@@ -23,6 +23,12 @@
     "plugins": ["expo-router", "expo-dev-client", "expo-system-ui"],
     "experiments": {
       "typedRoutes": true
-    }
+    },
+    "extra": {
+      "eas": {
+        "projectId": "f2f831b3-b2ac-4d29-9141-d4c0a0f15d5e"
+      }
+    },
+    "owner": "frazghumans-team"
   }
 }
