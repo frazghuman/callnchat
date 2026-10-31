@@ -1,10 +1,24 @@
+import '@/polyfills';
+
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
+import { useEffect } from 'react';
 
+import { LockScreen } from '@/features/lock/LockScreen';
+import { useAppLock } from '@/features/lock/useAppLock';
+import { expoSessionServices } from '@/features/session/expoServices';
+import { useSessionStore } from '@/features/session/sessionStore';
 import { useTheme } from '@/ui/theme';
 
 export default function RootLayout() {
   const theme = useTheme();
+  const init = useSessionStore((s) => s.init);
+  const locked = useSessionStore((s) => s.locked);
+  useAppLock();
+
+  useEffect(() => {
+    void init(expoSessionServices);
+  }, [init]);
 
   return (
     <>
@@ -16,8 +30,21 @@ export default function RootLayout() {
           contentStyle: { backgroundColor: theme.colors.background },
         }}
       >
-        <Stack.Screen name="index" options={{ title: 'CallNChat' }} />
+        <Stack.Screen name="index" options={{ headerShown: false }} />
+        <Stack.Screen name="onboarding/profile" options={{ title: 'Your name' }} />
+        <Stack.Screen
+          name="onboarding/pair"
+          options={{ title: 'Pair with your contact', headerBackVisible: false }}
+        />
+        <Stack.Screen
+          name="onboarding/scan"
+          options={{ title: 'Scan code', presentation: 'modal' }}
+        />
+        <Stack.Screen name="verify" options={{ title: 'Verify security' }} />
+        <Stack.Screen name="chat" options={{ headerBackVisible: false }} />
+        <Stack.Screen name="settings" options={{ title: 'Settings' }} />
       </Stack>
+      {locked ? <LockScreen /> : null}
     </>
   );
 }

@@ -15,12 +15,34 @@
     },
     "ios": {
       "bundleIdentifier": "com.frazghuman.callnchat",
-      "supportsTablet": false,
-      "config": {
-        "usesNonExemptEncryption": false
-      }
+      "supportsTablet": false
     },
-    "plugins": ["expo-router", "expo-dev-client", "expo-system-ui"],
+    "plugins": [
+      "expo-router",
+      "expo-dev-client",
+      "expo-system-ui",
+      "expo-secure-store",
+      [
+        "expo-sqlite",
+        {
+          "useSQLCipher": true
+        }
+      ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Scan your contact's pairing code. Video calls use the camera too.",
+          "microphonePermission": "Voice and video calls with your contact.",
+          "recordAudioAndroid": false
+        }
+      ],
+      [
+        "expo-local-authentication",
+        {
+          "faceIDPermission": "Unlock CallNChat with Face ID."
+        }
+      ]
+    ],
     "experiments": {
       "typedRoutes": true
     }

@@ -1,25 +1,40 @@
-import { StyleSheet, Text, View } from 'react-native';
+import { Redirect } from 'expo-router';
+import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 
+import { useSessionStore } from '@/features/session/sessionStore';
 import { useTheme } from '@/ui/theme';
 
-// Placeholder home until pairing lands in Phase 1.
-export default function HomeScreen() {
-  const theme = useTheme();
+/** Routes to the right step for the current session state. */
+export default function Index() {
+  const { colors } = useTheme();
+  const status = useSessionStore((s) => s.status);
+  const error = useSessionStore((s) => s.error);
 
-  return (
-    <View style={[styles.container, { backgroundColor: theme.colors.background }]}>
-      <Text style={[styles.title, { color: theme.colors.text, fontSize: theme.font.title }]}>
-        Not paired yet
-      </Text>
-      <Text style={[styles.body, { color: theme.colors.textMuted, fontSize: theme.font.body }]}>
-        Pair with your contact by sharing a secret code. Coming in the next build.
-      </Text>
-    </View>
-  );
+  switch (status) {
+    case 'needsProfile':
+      return <Redirect href="/onboarding/profile" />;
+    case 'needsPairing':
+      return <Redirect href="/onboarding/pair" />;
+    case 'paired':
+      return <Redirect href="/chat" />;
+    case 'error':
+      return (
+        <View style={[styles.center, { backgroundColor: colors.background }]}>
+          <Text style={{ color: colors.danger, textAlign: 'center' }}>
+            Couldn&apos;t open secure storage.{'\n'}
+            {error}
+          </Text>
+        </View>
+      );
+    default:
+      return (
+        <View style={[styles.center, { backgroundColor: colors.header }]}>
+          <ActivityIndicator color={colors.headerText} />
+        </View>
+      );
+  }
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24, gap: 8 },
-  title: { fontWeight: '600' },
-  body: { textAlign: 'center' },
+  center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 },
 });
