@@ -1,0 +1,119 @@
+# CallNChat — Complete Development Plan
+
+## Context
+
+Private messenger for exactly **2 users, both on iPhone**. WhatsApp-like UI/UX. Features: chat, voice/video calls, photos, docs, voice notes, location (pin + live). Constraints agreed in discussion:
+
+- **No owned server, no domain, $0** for v1.
+- Users connect by **sharing a secret pairing string** (or QR).
+- **Calls only when both apps are open**; presence shows 🟢 Online / ⚪ Last seen. "Phone off" is undetectable — only "not heard from".
+- Optional final phase: push-to-ring a closed app (requires $99/yr Apple Developer Program).
+
+Phase 0 scaffold lives on this repo; see README for commands.
+
+## Locked architecture
+
+```
+React Native (Expo SDK latest, dev client + prebuild, TypeScript strict, Hermes, New Arch)
+├─ UI: expo-router, FlashList, Reanimated, Gesture Handler, keyboard-controller, expo-image
+├─ State: zustand  │  DB: op-sqlite + SQLCipher (DB key in Keychain via expo-secure-store)
+├─ Crypto: @noble/curves, @noble/hashes, @noble/ciphers (audited, pure JS) + react-native-get-random-values
+├─ Rendezvous + offline mailbox: Nostr (nostr-tools) — NIP-44 encryption, NIP-59 gift wrap, 3–5 public relays in parallel
+├─ Live link: react-native-webrtc RTCDataChannel (chat, receipts, typing, files, location, call signaling)
+├─ Calls: separate RTCPeerConnection per call (audio/video), react-native-incall-manager for audio routing
+└─ NAT: STUN (Cloudflare + Google, free) → optional TURN creds entered once in Settings
+```
+
+Key simplifications (deliberate):
+
+- **No Hyperswarm/Bare** — one networking stack (WebRTC).
+- **No PAKE** — pairing string carries 32 random bytes (high entropy), so offline brute force is infeasible.
+- **No hand-rolled Double Ratchet** — live traffic gets forward secrecy from WebRTC DTLS (ephemeral ECDHE); SDP/DTLS fingerprints are signed by pinned identity keys → MITM-proof. Mailbox messages use NIP-44 with **rotating mailbox keys** (new key every 24h, exchanged over live link, old keys deleted) for coarse forward secrecy.
+
+## Repo layout
+
+```
+src/app/                  expo-router screens: (onboarding)/, chat/, call/, settings/, media/
+src/core/crypto/          identity, pairing codec, signing, mailbox key rotation
+src/core/nostr/           RelayPool, gift-wrap send/receive, presence heartbeats
+src/core/rtc/             PeerLink (DataChannel lifecycle, reconnect), CallSession
+src/core/protocol/        frame types (zod schemas), encoder/decoder, dedupe by ULID
+src/core/transfer/        chunked file send/receive, SHA-256 verify, resume
+src/data/                 SQLCipher schema, migrations, repositories
+src/features/             chat, media, location, calls, presence, settings (hooks + components)
+src/ui/                   WhatsApp-style design system (bubbles, ticks, headers, theme light/dark)
+test/node-harness/        two headless peers (nostr-tools + @roamhq/wrtc) for integration tests
+.github/workflows/        ci.yml (Linux: lint/typecheck/jest/harness), ios-build.yml (macOS: unsigned IPA)
+```
+
+## Protocol essentials
+
+- **Identity**: secp256k1 keypair per install (Nostr key), stored in Keychain (`WHEN_UNLOCKED_THIS_DEVICE_ONLY`).
+- **Pairing string**: `cnc1:` + base32(version | pubkey | 32-byte secret | relay hints). Shown as text + QR.
+  B imports → sends gift-wrapped `pair-request` with HMAC(secret, B.pubkey) → A verifies → both pin keys → secret destroyed → both show 6-emoji **safety code** (hash of both pubkeys) for in-person check.
+- **Presence**: ephemeral Nostr events (kind 2xxxx, not stored by relays), encrypted, every 20s while foreground; `bye` on background; timeout after 3 missed beats. Once DataChannel up, heartbeats every 5s over it.
+- **Connection**: when both online, lower pubkey = offerer; SDP/ICE exchanged via gift-wrapped Nostr events, each signed by identity key and fingerprint-checked.
+- **Frames** (DataChannel JSON, zod-validated): `msg, ack, read, typing, react, edit, delete, file-offer, file-chunk, file-ack, loc, loc-live, call-offer, call-answer, call-ice, call-end, mailbox-key`.
+- **Delivery**: send over DataChannel if up, else Nostr mailbox (text + ≤32 KB thumbnails only). Full files queue until both online. Dedupe by ULID across both paths. Ticks: ✓ sent (relay ok / channel ok), ✓✓ delivered, blue ✓✓ read.
+
+## Phases (one developer; estimates are rough)
+
+### Phase 0 — Foundation (≈3 days)
+
+Expo scaffold, TS strict, ESLint/Prettier, Jest, expo-router skeleton, theme tokens, CI on Linux, macOS workflow producing unsigned IPA artifact.
+**Done when**: CI green; IPA builds on GitHub Actions and installs via SideStore on a device.
+
+### Phase 1 — Identity, pairing, secure storage (≈1 week)
+
+Keychain identity, SQLCipher DB + migrations, pairing codec, QR show/scan (expo-camera), paste/share string, safety-code screen, app lock (Face ID via expo-local-authentication).
+**Done when**: two devices (or harness peers) pair, pins persist across restarts, tampered string rejected.
+
+### Phase 2 — Transport core (≈2 weeks)
+
+RelayPool (multi-relay publish, dedupe, backoff, relay health), presence state machine, PeerLink (offer/answer, ICE restart, reconnect on network change/AppState), frame codec, outbox with retry, mailbox fallback + key rotation.
+**Done when**: node harness passes — online/offline transitions, last-seen, message delivery via channel and via mailbox when peer offline, no duplicates.
+
+### Phase 3 — WhatsApp-style chat (≈2 weeks)
+
+Chat header with presence, bubbles, ticks, typing indicator, date separators, swipe-to-reply, long-press menu (react, copy, edit, delete for both, forward-to-notes), emoji reactions, search, disappearing messages timer, unread counter, local notifications while app foreground only.
+**Done when**: full chat flow works on two iPhones; 10k-message history scrolls smoothly.
+
+### Phase 4 — Media, docs, voice notes, location (≈2 weeks)
+
+expo-image-picker (photos/videos with compression), expo-document-picker, chunked transfer (16 KB chunks, backpressure via `bufferedAmountLowThreshold`, SHA-256 verify, resume), gallery viewer, voice notes (expo-audio record/playback, waveform), location pin + live location (expo-location, react-native-maps/Apple Maps, auto-expiry 15m/1h/8h).
+**Done when**: 200 MB video transfers with resume after app background/foreground; live location updates on both sides.
+
+### Phase 5 — Voice & video calls (≈2 weeks)
+
+Call button enabled only when 🟢; in-app full-screen incoming call with ringtone/haptics, 30s timeout → missed call entry; audio↔video upgrade, mute, speaker/earpiece, camera flip, PiP-style local preview, connection quality indicator, call log in chat.
+**Done when**: 30-min video call stable on Wi-Fi↔4G; network switch triggers ICE restart without dropping.
+
+### Phase 6 — Hardening & polish (≈1–2 weeks)
+
+Encrypted backup export/import (passphrase → Argon2id → file via share sheet), TURN settings + connectivity test, relay list editor, dark mode, accessibility, haptics, error/retry UX, crash-safe outbox, wipe/duress option, privacy screen in app switcher.
+**Done when**: restore from backup on a fresh install recovers history and pairing.
+
+### Phase 7 (optional, $99/yr) — Ring when app closed
+
+Apple Developer Program → PushKit + CallKit (react-native-callkeep, react-native-voip-push-notification); APNs JWT signed on-device with dedicated revocable .p8 key; TestFlight distribution replaces SideStore.
+
+**Total v1 (Phases 0–6): ≈10–12 weeks** [Guessing — single experienced RN dev].
+
+## Build & distribution ($0 path)
+
+- No Mac required: `ios-build.yml` on GitHub Actions macOS runner → unsigned `.ipa` artifact → installed via **SideStore** with a free Apple ID on each iPhone; SideStore auto-refreshes the 7-day signature.
+- Private repo free tier limits macOS minutes (~8–10 builds/month) [Likely]; local Mac + Xcode personal team is the alternative.
+- Expo Go cannot be used (native WebRTC) — always a dev-client build.
+
+## Verification
+
+1. `npm run lint && npm run typecheck && npm test` — unit tests for crypto, pairing codec, frame schemas, outbox, presence state machine.
+2. `npm run test:harness` — two headless Node peers over real public Nostr relays + node WebRTC: pairing, presence, channel + mailbox delivery, file transfer with resume, call signaling. Runs in this Linux container and CI.
+3. Device QA checklist per phase on both iPhones (Wi-Fi↔Wi-Fi, Wi-Fi↔cellular, cellular↔cellular, airplane-mode toggle, app background/kill).
+
+## Known risks
+
+- Both iPhones on carrier CGNAT may fail without TURN → Phase 6 TURN settings; measure in Phase 2.
+- Public Nostr relays can rate-limit or drop events → publish to 3–5 relays, user-editable list.
+- iOS suspends the app seconds after backgrounding → "online" means app on screen; accepted.
+- SideStore free signing limits (7-day expiry, 3 sideloaded apps per Apple ID).

@@ -1,0 +1,28 @@
+{
+  "expo": {
+    "name": "CallNChat",
+    "slug": "callnchat",
+    "scheme": "callnchat",
+    "version": "0.1.0",
+    "platforms": ["ios"],
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "automatic",
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#075E54"
+    },
+    "ios": {
+      "bundleIdentifier": "com.frazghuman.callnchat",
+      "supportsTablet": false,
+      "config": {
+        "usesNonExemptEncryption": false
+      }
+    },
+    "plugins": ["expo-router", "expo-dev-client", "expo-system-ui"],
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}
