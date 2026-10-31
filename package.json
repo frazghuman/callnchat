@@ -3,17 +3,29 @@
   "version": "1.0.0",
   "main": "expo-router/entry",
   "dependencies": {
+    "@noble/curves": "2.4.0",
+    "@noble/hashes": "2.4.0",
+    "@scure/base": "2.4.0",
     "expo": "~58.0.21",
+    "expo-camera": "~58.0.14",
+    "expo-clipboard": "~58.0.4",
     "expo-constants": "~58.0.14",
+    "expo-crypto": "~58.0.7",
     "expo-dev-client": "~58.0.17",
     "expo-linking": "~58.0.15",
+    "expo-local-authentication": "~58.0.2",
     "expo-router": "~58.0.28",
+    "expo-secure-store": "~58.0.2",
+    "expo-sqlite": "~58.0.14",
     "expo-status-bar": "~58.0.4",
     "expo-system-ui": "~58.0.7",
     "react": "19.3.0",
     "react-native": "0.88.1",
+    "react-native-qrcode-svg": "6.3.49",
     "react-native-safe-area-context": "~5.10.1",
-    "react-native-screens": "~4.30.0"
+    "react-native-screens": "~4.30.0",
+    "react-native-svg": "15.16.0",
+    "zustand": "5.0.16"
   },
   "devDependencies": {
     "@react-native/jest-preset": "^0.88.1",
@@ -47,6 +59,11 @@
     "preset": "jest-expo/ios",
     "moduleNameMapper": {
       "^@/(.*)$": "<rootDir>/src/$1"
-    }
+    },
+    "transformIgnorePatterns": [
+      "/node_modules/(?!(.pnpm|react-native|@react-native|@react-native-community|expo|@expo|@expo-google-fonts|react-navigation|@react-navigation|native-base|standard-navigation|@sentry/react-native|@noble|@scure|react-native-svg|react-native-qrcode-svg))",
+      "/node_modules/react-native-reanimated/plugin/",
+      "/node_modules/@react-native/babel-preset/"
+    ]
   }
 }

@@ -4,7 +4,8 @@ Private two-person messenger for iPhone: chat, voice/video calls, photos, docs a
 owned server. Peers find each other over public Nostr relays and talk directly over WebRTC.
 Full roadmap: [docs/PLAN.md](docs/PLAN.md).
 
-Status: **Phase 0 — foundation** (scaffold, tooling, CI, iOS build pipeline).
+Status: **Phase 1 — identity & pairing** (pairing codes + QR, safety code, encrypted storage, Face ID
+lock). Messaging starts in Phase 2/3.
 
 ## Stack
 
@@ -51,8 +52,12 @@ npm run build:ios                    # queues an unsigned Release build
 
 ```
 src/app/        Expo Router screens (every file is a route — keep tests and helpers out)
-src/ui/         design system (theme tokens, light/dark)
-src/__tests__/  screen tests
+src/core/       pure logic: crypto (identity, pairing codes, pair secret, safety code)
+src/data/       Keychain secrets, SQLCipher database, migrations, repositories
+src/features/   session state, app lock, feature components
+src/ui/         design system (theme tokens, light/dark, Button, TextField)
+src/__tests__/  screen flow tests
+test/           test helpers (node:sqlite database adapter)
 docs/PLAN.md    architecture + phased plan
 ```
 

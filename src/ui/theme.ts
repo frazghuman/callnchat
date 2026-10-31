@@ -14,6 +14,7 @@ export type ThemeColors = {
   tickRead: string;
   online: string;
   separator: string;
+  danger: string;
 };
 
 export type Theme = {
@@ -38,6 +39,7 @@ const light: ThemeColors = {
   tickRead: '#53BDEB',
   online: '#25D366',
   separator: '#E9EDEF',
+  danger: '#E53935',
 };
 
 const dark: ThemeColors = {
@@ -54,6 +56,7 @@ const dark: ThemeColors = {
   tickRead: '#53BDEB',
   online: '#00A884',
   separator: '#222D34',
+  danger: '#F15C6D',
 };
 
 const shared = {

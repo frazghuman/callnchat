@@ -50,8 +50,10 @@ test/node-harness/        two headless peers (nostr-tools + @roamhq/wrtc) for in
 ## Protocol essentials
 
 - **Identity**: secp256k1 keypair per install (Nostr key), stored in Keychain (`WHEN_UNLOCKED_THIS_DEVICE_ONLY`).
-- **Pairing string**: `cnc1:` + base32(version | pubkey | 32-byte secret | relay hints). Shown as text + QR.
-  B imports → sends gift-wrapped `pair-request` with HMAC(secret, B.pubkey) → A verifies → both pin keys → secret destroyed → both show 6-emoji **safety code** (hash of both pubkeys) for in-person check.
+- **Pairing code** (Phase 1, implemented): `cnc1…` bech32m of version | x-only pubkey | 32-byte secret (checksum
+  catches typos). Shown as text + QR. Both users add **each other's** code, so each side derives the same pair
+  secret offline: HKDF-SHA256(sorted secrets, salt = sorted pubkeys). Keys pinned; 6-emoji + 12-digit **safety
+  code** (hash of both pubkeys) for an in-person check. Phase 2 confirms the pair secret over Nostr with an HMAC.
 - **Presence**: ephemeral Nostr events (kind 2xxxx, not stored by relays), encrypted, every 20s while foreground; `bye` on background; timeout after 3 missed beats. Once DataChannel up, heartbeats every 5s over it.
 - **Connection**: when both online, lower pubkey = offerer; SDP/ICE exchanged via gift-wrapped Nostr events, each signed by identity key and fingerprint-checked.
 - **Frames** (DataChannel JSON, zod-validated): `msg, ack, read, typing, react, edit, delete, file-offer, file-chunk, file-ack, loc, loc-live, call-offer, call-answer, call-ice, call-end, mailbox-key`.
