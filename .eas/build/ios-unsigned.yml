@@ -6,7 +6,8 @@ build:
     - eas/checkout
     - eas/install_node_modules
     - eas/prebuild
-    - eas/install_pods
+    - eas/install_pods:
+        working_directory: ./ios
     - run:
         name: Build app (unsigned)
         command: |
