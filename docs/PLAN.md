@@ -43,7 +43,8 @@ src/data/                 SQLCipher schema, migrations, repositories
 src/features/             chat, media, location, calls, presence, settings (hooks + components)
 src/ui/                   WhatsApp-style design system (bubbles, ticks, headers, theme light/dark)
 test/node-harness/        two headless peers (nostr-tools + @roamhq/wrtc) for integration tests
-.github/workflows/        ci.yml (Linux: lint/typecheck/jest/harness), ios-build.yml (macOS: unsigned IPA)
+.github/workflows/        ci.yml (Linux: lint/typecheck/jest/harness)
+.eas/build/               ios-unsigned.yml (EAS custom build: unsigned IPA)
 ```
 
 ## Protocol essentials
@@ -60,8 +61,8 @@ test/node-harness/        two headless peers (nostr-tools + @roamhq/wrtc) for in
 
 ### Phase 0 — Foundation (≈3 days)
 
-Expo scaffold, TS strict, ESLint/Prettier, Jest, expo-router skeleton, theme tokens, CI on Linux, macOS workflow producing unsigned IPA artifact.
-**Done when**: CI green; IPA builds on GitHub Actions and installs via SideStore on a device.
+Expo scaffold, TS strict, ESLint/Prettier, Jest, expo-router skeleton, theme tokens, CI on Linux, EAS custom build producing unsigned IPA artifact.
+**Done when**: CI green; IPA builds on EAS and installs via SideStore on a device.
 
 ### Phase 1 — Identity, pairing, secure storage (≈1 week)
 
@@ -101,8 +102,8 @@ Apple Developer Program → PushKit + CallKit (react-native-callkeep, react-nati
 
 ## Build & distribution ($0 path)
 
-- No Mac required: `ios-build.yml` on GitHub Actions macOS runner → unsigned `.ipa` artifact → installed via **SideStore** with a free Apple ID on each iPhone; SideStore auto-refreshes the 7-day signature.
-- Private repo free tier limits macOS minutes (~8–10 builds/month) [Likely]; local Mac + Xcode personal team is the alternative.
+- No Mac required: EAS Build free plan, profile `ios-unsigned` (`withoutCredentials`, custom steps in `.eas/build/ios-unsigned.yml`) → unsigned `.ipa` artifact → installed via **SideStore** with a free Apple ID on each iPhone; SideStore auto-refreshes the 7-day signature.
+- EAS free plan: ~15 iOS builds/month on a low-priority queue [Likely]. Fallbacks: Codemagic (500 free macOS minutes/month), local Mac + Xcode personal team. GitHub Actions is unavailable while the account has an unpaid invoice.
 - Expo Go cannot be used (native WebRTC) — always a dev-client build.
 
 ## Verification

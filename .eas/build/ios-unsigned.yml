@@ -1,0 +1,35 @@
+# Unsigned Release .ipa for sideloading with SideStore (free Apple ID re-signs it on device).
+# Used by the `ios-unsigned` profile in eas.json, which sets withoutCredentials.
+build:
+  name: Unsigned iOS IPA
+  steps:
+    - eas/checkout
+    - eas/install_node_modules
+    - eas/prebuild
+    - eas/install_pods
+    - run:
+        name: Build app (unsigned)
+        command: |
+          xcodebuild -version
+          xcodebuild \
+            -workspace ios/CallNChat.xcworkspace \
+            -scheme CallNChat \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            build
+    - run:
+        name: Package .ipa
+        command: |
+          rm -rf Payload CallNChat-unsigned.ipa
+          mkdir Payload
+          cp -R build/Build/Products/Release-iphoneos/CallNChat.app Payload/
+          zip -qry CallNChat-unsigned.ipa Payload
+    - eas/upload_artifact:
+        name: Upload .ipa
+        inputs:
+          path: CallNChat-unsigned.ipa

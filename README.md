@@ -31,9 +31,20 @@ npm run ios          # local Debug build on a Mac with Xcode
 
 ## Installing on iPhone without a Mac ($0)
 
-1. GitHub → Actions → **iOS build** → _Run workflow_ (or push a `v*` tag).
-2. Download the `CallNChat-unsigned-ipa` artifact and unzip it to get `CallNChat-unsigned.ipa`.
-3. Install it with [SideStore](https://sidestore.io) using a free Apple ID. SideStore re-signs it
+Builds run on Expo's free EAS cloud as a custom, credential-less build (`eas.json` profile
+`ios-unsigned`, steps in `.eas/build/ios-unsigned.yml`). Needs a free Expo account and an
+`EXPO_TOKEN` access token in the environment.
+
+```bash
+npx eas-cli init --non-interactive   # once: links the project to your Expo account
+```
+
+```bash
+npm run build:ios                    # queues an unsigned Release build
+```
+
+1. Download `CallNChat-unsigned.ipa` from the build page on expo.dev (or `npx eas-cli build:list`).
+2. Install it with [SideStore](https://sidestore.io) using a free Apple ID. SideStore re-signs it
    and refreshes the 7-day signature in the background.
 
 ## Layout
