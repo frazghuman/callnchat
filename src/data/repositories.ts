@@ -8,6 +8,8 @@ export type Peer = {
   pairSecret: string;
   pairedAt: number;
   verifiedAt: number | null;
+  /** When the peer proved it added our code too (valid hello). */
+  confirmedAt: number | null;
 };
 
 type PeerRow = {
@@ -16,6 +18,7 @@ type PeerRow = {
   pair_secret: string;
   paired_at: number;
   verified_at: number | null;
+  confirmed_at: number | null;
 };
 
 export async function getProfile(db: Db): Promise<Profile | null> {
@@ -42,6 +45,7 @@ export async function getPeer(db: Db): Promise<Peer | null> {
     pairSecret: row.pair_secret,
     pairedAt: row.paired_at,
     verifiedAt: row.verified_at,
+    confirmedAt: row.confirmed_at,
   };
 }
 
@@ -56,6 +60,10 @@ export async function insertPeer(db: Db, peer: Peer): Promise<void> {
 
 export async function markPeerVerified(db: Db, at: number): Promise<void> {
   await db.run('UPDATE peer SET verified_at = ? WHERE id = 1', [at]);
+}
+
+export async function markPeerConfirmed(db: Db, at: number): Promise<void> {
+  await db.run('UPDATE peer SET confirmed_at = ? WHERE id = 1 AND confirmed_at IS NULL', [at]);
 }
 
 export async function getSetting(db: Db, key: string): Promise<string | null> {

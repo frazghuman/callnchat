@@ -1,3 +1,4 @@
+import { Stack } from 'expo-router';
 import { fireEvent, renderRouter, screen, waitFor } from 'expo-router/testing-library';
 
 import Chat from '@/app/chat';
@@ -20,6 +21,7 @@ jest.mock('expo-clipboard', () => ({
 jest.mock('react-native-qrcode-svg', () => 'QRCode');
 
 const routes = {
+  _layout: () => <Stack />,
   index: Index,
   'onboarding/profile': Profile,
   'onboarding/pair': Pair,
@@ -63,5 +65,6 @@ it('walks a new user from launch to a paired chat', async () => {
 
   await fireEvent.press(screen.getByText('They match'));
   await waitFor(() => expect(screen).toHavePathname('/chat'));
-  expect(screen.getByText(/Paired with Bob · verified/)).toBeTruthy();
+  expect(screen.getByText(/End-to-end encrypted. Only Bob and you/)).toBeTruthy();
+  expect(screen.getByLabelText('Message')).toBeTruthy();
 });

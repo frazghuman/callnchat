@@ -109,6 +109,7 @@ export async function addPeer(
     pairSecret: bytesToHex(derivePairSecret(session.ownCode, peerCode)),
     pairedAt: services.now(),
     verifiedAt: null,
+    confirmedAt: null,
   };
   await insertPeer(session.db, peer);
   return { ...session, peer };

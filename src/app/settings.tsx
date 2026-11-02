@@ -2,6 +2,7 @@ import { router } from 'expo-router';
 import { useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 
+import { useChatStore } from '@/features/chat/chatStore';
 import { authenticate } from '@/features/lock/biometrics';
 import { MyCodeCard } from '@/features/session/components/MyCodeCard';
 import { useSessionStore } from '@/features/session/sessionStore';
@@ -42,6 +43,8 @@ export default function SettingsScreen() {
           onPress: async () => {
             setBusy(true);
             try {
+              // Stop talking to relays before the database and keys are deleted.
+              await useChatStore.getState().stop();
               await reset();
               router.replace('/');
             } finally {

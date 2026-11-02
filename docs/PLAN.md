@@ -19,7 +19,7 @@ React Native (Expo SDK latest, dev client + prebuild, TypeScript strict, Hermes,
 ├─ State: zustand  │  DB: op-sqlite + SQLCipher (DB key in Keychain via expo-secure-store)
 ├─ Crypto: @noble/curves, @noble/hashes, @noble/ciphers (audited, pure JS) + react-native-get-random-values
 ├─ Rendezvous + offline mailbox: Nostr (nostr-tools) — NIP-44 encryption, NIP-59 gift wrap, 3–5 public relays in parallel
-├─ Live link: react-native-webrtc RTCDataChannel (chat, receipts, typing, files, location, call signaling)
+├─ Live link (Phase 4/5): react-native-webrtc — files and calls only; chat stays on Nostr (decided in Phase 2)
 ├─ Calls: separate RTCPeerConnection per call (audio/video), react-native-incall-manager for audio routing
 └─ NAT: STUN (Cloudflare + Google, free) → optional TURN creds entered once in Settings
 ```
@@ -57,7 +57,12 @@ test/node-harness/        two headless peers (nostr-tools + @roamhq/wrtc) for in
 - **Presence**: ephemeral Nostr events (kind 2xxxx, not stored by relays), encrypted, every 20s while foreground; `bye` on background; timeout after 3 missed beats. Once DataChannel up, heartbeats every 5s over it.
 - **Connection**: when both online, lower pubkey = offerer; SDP/ICE exchanged via gift-wrapped Nostr events, each signed by identity key and fingerprint-checked.
 - **Frames** (DataChannel JSON, zod-validated): `msg, ack, read, typing, react, edit, delete, file-offer, file-chunk, file-ack, loc, loc-live, call-offer, call-answer, call-ice, call-end, mailbox-key`.
-- **Delivery**: send over DataChannel if up, else Nostr mailbox (text + ≤32 KB thumbnails only). Full files queue until both online. Dedupe by ULID across both paths. Ticks: ✓ sent (relay ok / channel ok), ✓✓ delivered, blue ✓✓ read.
+- **Delivery** (Phase 2, implemented): every text, receipt, presence and typing frame goes over Nostr. Durable
+  frames = NIP-59 gift wraps (kind 1059, backdated ≤2 days, expire after 30 days); presence/typing = same seal in
+  ephemeral kind 21059. Seal must be signed by the pinned peer. Outbox retries with backoff; dedupe by wrap id and
+  message id. Ticks: ✓ sent (≥1 relay accepted), ✓✓ delivered, blue ✓✓ read. Own per-relay reconnect loop
+  (nostr-tools' reconnect resumes from the last event time and would skip backdated wraps). Full files go over
+  WebRTC in Phase 4.
 
 ## Phases (one developer; estimates are rough)
 
@@ -71,10 +76,14 @@ Expo scaffold, TS strict, ESLint/Prettier, Jest, expo-router skeleton, theme tok
 Keychain identity, SQLCipher DB + migrations, pairing codec, QR show/scan (expo-camera), paste/share string, safety-code screen, app lock (Face ID via expo-local-authentication).
 **Done when**: two devices (or harness peers) pair, pins persist across restarts, tampered string rejected.
 
-### Phase 2 — Transport core (≈2 weeks)
+### Phase 2 — Nostr messaging core (done)
 
-RelayPool (multi-relay publish, dedupe, backoff, relay health), presence state machine, PeerLink (offer/answer, ICE restart, reconnect on network change/AppState), frame codec, outbox with retry, mailbox fallback + key rotation.
-**Done when**: node harness passes — online/offline transitions, last-seen, message delivery via channel and via mailbox when peer offline, no duplicates.
+Relay transport (per-relay subscriptions + own reconnect loop, NIP-42 AUTH), gift-wrap envelope with strict
+unwrap, zod-validated frames, messenger (outbox with backoff, dedupe, delivered/read receipts, hello confirmation,
+presence + typing), schema v2 (messages, seen events), basic chat screen.
+**Verified**: two simulated phones over two local relays — offline delivery, delivered → read, presence and
+typing, relays down → pending → delivered after restart, stranger wraps ignored. WebRTC PeerLink moved to
+Phase 4/5. Mailbox key rotation still in Phase 6.
 
 ### Phase 3 — WhatsApp-style chat (≈2 weeks)
 

@@ -1,11 +1,12 @@
 # CallNChat
 
 Private two-person messenger for iPhone: chat, voice/video calls, photos, docs and location, with no
-owned server. Peers find each other over public Nostr relays and talk directly over WebRTC.
+owned server. Messages travel as end-to-end encrypted events through public Nostr relays; calls and
+files will go directly phone-to-phone over WebRTC.
 Full roadmap: [docs/PLAN.md](docs/PLAN.md).
 
-Status: **Phase 1 — identity & pairing** (pairing codes + QR, safety code, encrypted storage, Face ID
-lock). Messaging starts in Phase 2/3.
+Status: **Phase 2 — messaging over Nostr** (encrypted text messages with sent/delivered/read ticks,
+online / last seen / typing, offline delivery via relays). WhatsApp-style polish is Phase 3.
 
 ## Stack
 
@@ -52,12 +53,13 @@ npm run build:ios                    # queues an unsigned Release build
 
 ```
 src/app/        Expo Router screens (every file is a route — keep tests and helpers out)
-src/core/       pure logic: crypto (identity, pairing codes, pair secret, safety code)
+src/core/       pure logic: crypto, protocol frames, Nostr gift-wrap envelope + relay transport,
+                messenger (outbox, receipts, presence)
 src/data/       Keychain secrets, SQLCipher database, migrations, repositories
 src/features/   session state, app lock, feature components
 src/ui/         design system (theme tokens, light/dark, Button, TextField)
 src/__tests__/  screen flow tests
-test/           test helpers (node:sqlite database adapter)
+test/           test helpers (node:sqlite database adapter, local Nostr relay)
 docs/PLAN.md    architecture + phased plan
 ```
 

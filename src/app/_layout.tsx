@@ -4,6 +4,7 @@ import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
 
+import { useMessengerLifecycle } from '@/features/chat/useMessengerLifecycle';
 import { LockScreen } from '@/features/lock/LockScreen';
 import { useAppLock } from '@/features/lock/useAppLock';
 import { expoSessionServices } from '@/features/session/expoServices';
@@ -15,6 +16,7 @@ export default function RootLayout() {
   const init = useSessionStore((s) => s.init);
   const locked = useSessionStore((s) => s.locked);
   useAppLock();
+  useMessengerLifecycle();
 
   useEffect(() => {
     void init(expoSessionServices);
