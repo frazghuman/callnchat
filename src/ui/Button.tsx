@@ -42,6 +42,12 @@ export function Button({ title, onPress, variant = 'primary', disabled, busy }: 
 }
 
 const styles = StyleSheet.create({
-  base: { alignItems: 'center', borderWidth: 1, paddingHorizontal: 20 },
-  title: { fontSize: 16, fontWeight: '600' },
+  base: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    paddingHorizontal: 20,
+    minHeight: 48,
+  },
+  title: { fontSize: 16, lineHeight: 21, fontWeight: '600' },
 });

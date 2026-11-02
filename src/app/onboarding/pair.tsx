@@ -1,7 +1,9 @@
 import * as Clipboard from 'expo-clipboard';
 import { router } from 'expo-router';
+import { useHeaderHeight } from 'expo-router/react-navigation';
 import { useState } from 'react';
 import { KeyboardAvoidingView, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { MyCodeCard } from '@/features/session/components/MyCodeCard';
 import { pairingErrorMessage } from '@/features/session/messages';
@@ -12,6 +14,8 @@ import { useTheme } from '@/ui/theme';
 
 export default function PairScreen() {
   const { colors, font } = useTheme();
+  const insets = useSafeAreaInsets();
+  const headerHeight = useHeaderHeight();
   const ownCode = useSessionStore((s) => s.session?.ownCodeText ?? '');
   const pair = useSessionStore((s) => s.pair);
   const code = useSessionStore((s) => s.draftCode);
@@ -40,8 +44,16 @@ export default function PairScreen() {
   }
 
   return (
-    <KeyboardAvoidingView behavior="padding" style={styles.flex}>
-      <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
+    <KeyboardAvoidingView
+      behavior="padding"
+      keyboardVerticalOffset={headerHeight}
+      style={styles.flex}
+    >
+      <ScrollView
+        contentInsetAdjustmentBehavior="automatic"
+        contentContainerStyle={[styles.container, { paddingBottom: insets.bottom + 24 }]}
+        keyboardShouldPersistTaps="handled"
+      >
         <Text style={[styles.heading, { color: colors.text, fontSize: font.body }]}>
           1. Send your code to your contact
         </Text>
@@ -98,7 +110,7 @@ export default function PairScreen() {
 
 const styles = StyleSheet.create({
   flex: { flex: 1 },
-  container: { padding: 20, gap: 16, paddingBottom: 48 },
+  container: { padding: 20, gap: 16 },
   heading: { fontWeight: '600' },
   row: { flexDirection: 'row', gap: 12 },
   codeInput: { minHeight: 72, fontFamily: 'Menlo', fontSize: 13 },

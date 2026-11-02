@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useSessionStore } from '@/features/session/sessionStore';
 import { Button } from '@/ui/Button';
@@ -9,6 +10,7 @@ import { authenticate, type BiometricResult } from './biometrics';
 
 export function LockScreen() {
   const { colors, font } = useTheme();
+  const insets = useSafeAreaInsets();
   const unlock = useSessionStore((s) => s.unlock);
   const [message, setMessage] = useState<string | null>(null);
 
@@ -35,7 +37,13 @@ export function LockScreen() {
   }, [handle]);
 
   return (
-    <View style={[StyleSheet.absoluteFill, styles.container, { backgroundColor: colors.header }]}>
+    <View
+      style={[
+        StyleSheet.absoluteFill,
+        styles.container,
+        { backgroundColor: colors.header, paddingBottom: insets.bottom },
+      ]}
+    >
       <Text style={[styles.title, { color: colors.headerText, fontSize: font.title }]}>
         🔒 CallNChat
       </Text>

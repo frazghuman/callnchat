@@ -36,5 +36,5 @@ export function TextField({ label, error, style, ...input }: Props) {
 }
 
 const styles = StyleSheet.create({
-  input: { borderWidth: 1, paddingHorizontal: 14, paddingVertical: 12 },
+  input: { borderWidth: 1, paddingHorizontal: 14, paddingVertical: 12, minHeight: 48 },
 });

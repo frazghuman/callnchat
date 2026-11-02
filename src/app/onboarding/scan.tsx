@@ -2,6 +2,7 @@ import { CameraView, useCameraPermissions } from 'expo-camera';
 import { router } from 'expo-router';
 import { useRef } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useSessionStore } from '@/features/session/sessionStore';
 import { Button } from '@/ui/Button';
@@ -9,6 +10,7 @@ import { useTheme } from '@/ui/theme';
 
 export default function ScanScreen() {
   const { colors, font } = useTheme();
+  const insets = useSafeAreaInsets();
   const [permission, requestPermission] = useCameraPermissions();
   const setDraftCode = useSessionStore((s) => s.setDraftCode);
   const handled = useRef(false);
@@ -17,7 +19,12 @@ export default function ScanScreen() {
 
   if (!permission.granted) {
     return (
-      <View style={[styles.center, { backgroundColor: colors.background }]}>
+      <View
+        style={[
+          styles.center,
+          { backgroundColor: colors.background, paddingBottom: insets.bottom + 24 },
+        ]}
+      >
         <Text style={{ color: colors.text, fontSize: font.body, textAlign: 'center' }}>
           Camera access is needed to scan your contact&apos;s code. You can also paste it instead.
         </Text>
@@ -39,7 +46,7 @@ export default function ScanScreen() {
           router.back();
         }}
       />
-      <View style={styles.hint}>
+      <View style={[styles.hint, { bottom: insets.bottom + 24 }]}>
         <Text style={styles.hintText}>Point at the QR code on your contact&apos;s phone</Text>
       </View>
     </View>
@@ -49,7 +56,7 @@ export default function ScanScreen() {
 const styles = StyleSheet.create({
   flex: { flex: 1 },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24, gap: 20 },
-  hint: { position: 'absolute', bottom: 48, left: 0, right: 0, alignItems: 'center' },
+  hint: { position: 'absolute', left: 0, right: 0, alignItems: 'center' },
   hintText: {
     color: '#FFFFFF',
     backgroundColor: 'rgba(0,0,0,0.6)',

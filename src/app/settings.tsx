@@ -1,6 +1,7 @@
 import { router } from 'expo-router';
 import { useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useChatStore } from '@/features/chat/chatStore';
 import { authenticate } from '@/features/lock/biometrics';
@@ -11,6 +12,7 @@ import { useTheme } from '@/ui/theme';
 
 export default function SettingsScreen() {
   const { colors, font, radius } = useTheme();
+  const insets = useSafeAreaInsets();
   const session = useSessionStore((s) => s.session);
   const setAppLock = useSessionStore((s) => s.setAppLock);
   const reset = useSessionStore((s) => s.reset);
@@ -57,7 +59,10 @@ export default function SettingsScreen() {
   }
 
   return (
-    <ScrollView contentContainerStyle={styles.container}>
+    <ScrollView
+      contentInsetAdjustmentBehavior="automatic"
+      contentContainerStyle={[styles.container, { paddingBottom: insets.bottom + 24 }]}
+    >
       <View style={rowStyle}>
         <Text style={{ color: colors.textMuted, fontSize: font.caption }}>Your name</Text>
         <Text style={{ color: colors.text, fontSize: font.body }}>
@@ -94,7 +99,7 @@ export default function SettingsScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { padding: 16, gap: 12, paddingBottom: 48 },
+  container: { padding: 16, gap: 12 },
   row: { paddingHorizontal: 16, paddingVertical: 14, gap: 4 },
   inline: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   section: { marginTop: 12, fontSize: 13, textTransform: 'uppercase' },

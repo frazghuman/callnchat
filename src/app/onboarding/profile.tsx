@@ -1,6 +1,7 @@
 import { router } from 'expo-router';
 import { useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useSessionStore } from '@/features/session/sessionStore';
 import { Button } from '@/ui/Button';
@@ -9,6 +10,7 @@ import { useTheme } from '@/ui/theme';
 
 export default function ProfileScreen() {
   const { colors, font } = useTheme();
+  const insets = useSafeAreaInsets();
   const setProfile = useSessionStore((s) => s.setProfile);
   const [name, setName] = useState('');
   const [busy, setBusy] = useState(false);
@@ -24,7 +26,7 @@ export default function ProfileScreen() {
   }
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { paddingBottom: insets.bottom + 24 }]}>
       <Text style={{ color: colors.textMuted, fontSize: font.body }}>
         Your contact will see this name. It stays on your phones only.
       </Text>

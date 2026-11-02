@@ -1,6 +1,7 @@
 import { router } from 'expo-router';
 import { useMemo, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { hexToBytes } from '@/core/crypto/bytes';
 import { safetyCode } from '@/core/crypto/safetyCode';
@@ -10,6 +11,7 @@ import { useTheme } from '@/ui/theme';
 
 export default function VerifyScreen() {
   const { colors, font, radius } = useTheme();
+  const insets = useSafeAreaInsets();
   const session = useSessionStore((s) => s.session);
   const verify = useSessionStore((s) => s.verify);
   const [busy, setBusy] = useState(false);
@@ -38,7 +40,7 @@ export default function VerifyScreen() {
   }
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { paddingBottom: insets.bottom + 24 }]}>
       <Text style={{ color: colors.text, fontSize: font.body, textAlign: 'center' }}>
         Compare these with {peer.displayName}, in person or on a call. If they match, nobody is
         intercepting your conversation.
