@@ -40,6 +40,28 @@ const MIGRATIONS: string[] = [
   );
   ALTER TABLE peer ADD COLUMN confirmed_at INTEGER;
   `,
+  `
+  ALTER TABLE messages ADD COLUMN kind TEXT NOT NULL DEFAULT 'text';
+  ALTER TABLE messages ADD COLUMN edited_at INTEGER;
+  ALTER TABLE messages ADD COLUMN deleted_at INTEGER;
+  ALTER TABLE messages ADD COLUMN expires_at INTEGER;
+  ALTER TABLE messages ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0;
+  CREATE INDEX messages_expires_at ON messages (expires_at) WHERE expires_at IS NOT NULL;
+  CREATE TABLE reactions (
+    message_id TEXT NOT NULL,
+    author TEXT NOT NULL CHECK (author IN ('me', 'peer')),
+    emoji TEXT,
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY (message_id, author)
+  );
+  CREATE TABLE outbox (
+    id TEXT PRIMARY KEY,
+    frame TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    attempts INTEGER NOT NULL DEFAULT 0,
+    next_attempt_at INTEGER
+  );
+  `,
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.length;

@@ -10,12 +10,14 @@ export function ChatHeaderTitle({ name }: { name: string }) {
   const presence = useChatStore((s) => s.presence);
   const connectedRelays = useChatStore((s) => s.connectedRelays);
   const statusAt = useChatStore((s) => s.statusAt);
+  const disappear = useChatStore((s) => s.disappear);
   const subtitle = presenceLabel(presence, connectedRelays, statusAt);
 
   return (
     <View style={styles.container}>
       <Text numberOfLines={1} style={[styles.name, { color: colors.headerText }]}>
         {name}
+        {disappear ? <Text accessibilityLabel="Disappearing messages on"> ⏱</Text> : null}
       </Text>
       {subtitle ? (
         <Text

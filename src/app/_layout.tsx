@@ -3,6 +3,8 @@ import '@/polyfills';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
+import { StyleSheet } from 'react-native';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 
 import { useMessengerLifecycle } from '@/features/chat/useMessengerLifecycle';
 import { LockScreen } from '@/features/lock/LockScreen';
@@ -23,7 +25,7 @@ export default function RootLayout() {
   }, [init]);
 
   return (
-    <>
+    <GestureHandlerRootView style={styles.root}>
       <StatusBar style="light" />
       <Stack
         screenOptions={{
@@ -44,9 +46,12 @@ export default function RootLayout() {
         />
         <Stack.Screen name="verify" options={{ title: 'Verify security' }} />
         <Stack.Screen name="chat" options={{ headerBackVisible: false }} />
+        <Stack.Screen name="search" options={{ title: 'Search' }} />
         <Stack.Screen name="settings" options={{ title: 'Settings' }} />
       </Stack>
       {locked ? <LockScreen /> : null}
-    </>
+    </GestureHandlerRootView>
   );
 }
+
+const styles = StyleSheet.create({ root: { flex: 1 } });

@@ -1,19 +1,41 @@
 import { KIND_EPHEMERAL_WRAP, KIND_WRAP, openEnvelope, sealFrame } from '@/core/nostr/envelope';
 import type { NostrEvent } from '@/core/nostr/envelope';
 import type { RelayTransport } from '@/core/nostr/relayPool';
-import { MAX_TEXT_LENGTH, type Frame, type MsgFrame } from '@/core/protocol/frames';
+import {
+  DELETE_FOR_EVERYONE_WINDOW_MS,
+  DISAPPEAR_OPTIONS,
+  EDIT_WINDOW_MS,
+  MAX_TEXT_LENGTH,
+  parseFrame,
+  type DisappearSeconds,
+  type Frame,
+  type MsgFrame,
+} from '@/core/protocol/frames';
 import { newMessageId } from '@/core/protocol/ids';
 import type { Db } from '@/data/db';
 import {
   advanceOutgoing,
+  applyEdit,
+  completeIncoming,
+  dropStaleOutbox,
   duePending,
+  dueOutbox,
+  enqueueOutbox,
   failStalePending,
   getMessage,
+  hideMessages,
   insertMessage,
+  markDeleted,
   markEventSeen,
   markIncomingRead,
+  newMessage,
   pruneSeenEvents,
+  pruneTombstones,
+  purgeExpired,
+  removeOutbox,
+  retryOutbox,
   scheduleRetry,
+  setReaction,
   unreadIncomingIds,
   type Message,
 } from '@/data/messages';
@@ -27,14 +49,24 @@ import {
   type PeerPresence,
 } from './presence';
 
-const TWO_DAYS_MS = 2 * 24 * 60 * 60 * 1000;
-const FAIL_AFTER_MS = 24 * 60 * 60 * 1000;
-const SEEN_EVENTS_TTL_MS = 35 * 24 * 60 * 60 * 1000;
+const DAY_MS = 24 * 60 * 60 * 1000;
+const TWO_DAYS_MS = 2 * DAY_MS;
+const FAIL_AFTER_MS = DAY_MS;
+const SEEN_EVENTS_TTL_MS = 35 * DAY_MS;
+const OUTBOX_TTL_MS = 7 * DAY_MS;
+/** Allow some clock skew before rejecting a peer's late edit. */
+const EDIT_SKEW_MS = 5 * 60 * 1000;
 const SETTING_LAST_SYNC = 'lastSync';
 const SETTING_PEER_LAST_SEEN = 'peerLastSeen';
+const SETTING_DISAPPEAR = 'disappear';
 
 /** 4 s, 8 s, 16 s … capped at 60 s. */
 const retryDelay = (attempts: number) => Math.min(60_000, 2_000 * 2 ** Math.min(attempts, 5));
+
+export type DisappearSetting = { seconds: DisappearSeconds; at: number };
+
+/** Body of a system row recording a timer change. */
+export type TimerNotice = { type: 'timer'; seconds: DisappearSeconds; by: 'me' | 'peer' };
 
 export type MessengerConfig = {
   transport: RelayTransport;
@@ -55,6 +87,7 @@ export type MessengerListener = {
   presenceChanged?: (presence: PeerPresence) => void;
   connectionChanged?: (connectedRelays: number) => void;
   peerConfirmed?: (at: number) => void;
+  disappearChanged?: (seconds: DisappearSeconds) => void;
 };
 
 export class MessageTooLongError extends Error {
@@ -63,9 +96,20 @@ export class MessageTooLongError extends Error {
   }
 }
 
+export class MessageActionError extends Error {
+  constructor(readonly reason: 'not-found' | 'not-own' | 'too-late' | 'deleted') {
+    super(`Cannot change message: ${reason}`);
+    this.name = 'MessageActionError';
+  }
+}
+
 /**
  * Talks to the paired peer over Nostr relays: outbox with retries, inbox with dedupe,
- * delivery/read receipts, hello confirmation, presence and typing.
+ * delivery/read receipts, hello confirmation, presence, typing, reactions, edits, deletes and
+ * disappearing messages.
+ *
+ * Relays replay stored wraps in (randomized) timestamp order, so every frame handler is written to
+ * give the same result whatever order frames arrive in.
  */
 export class Messenger {
   private readonly now: () => number;
@@ -84,6 +128,7 @@ export class Messenger {
   private pendingReceipts = { delivered: new Set<string>(), read: new Set<string>() };
   private receiptTimer: ReturnType<typeof setTimeout> | null = null;
   private lastSync: number | null = null;
+  private disappear: DisappearSetting = { seconds: 0, at: 0 };
 
   constructor(
     private readonly config: MessengerConfig,
@@ -105,7 +150,10 @@ export class Messenger {
     this.lastSync = lastSync ? Number(lastSync) : null;
     const lastSeen = await getSetting(db, SETTING_PEER_LAST_SEEN);
     this.presence = new PresenceTracker(lastSeen ? Number(lastSeen) : null);
+    this.disappear = await loadDisappear(db);
+    this.listener.disappearChanged?.(this.disappear.seconds);
     this.emitPresence();
+    if (await purgeExpired(db, this.now())) this.listener.messagesChanged?.();
 
     this.config.transport.start({
       filter: () => ({
@@ -148,9 +196,12 @@ export class Messenger {
     // Best effort: tell the peer right away instead of letting the heartbeat time out.
     await this.publish({ t: 'presence', state: 'offline' }).catch(() => undefined);
     await this.inbox;
+    await this.flushing;
     this.config.transport.stop();
     await this.persistLastSeen();
   }
+
+  // --- user actions -----------------------------------------------------------------------------
 
   /** Stores the message as pending and sends it; delivery continues via the outbox if offline. */
   async send(text: string, replyTo?: string): Promise<Message> {
@@ -158,15 +209,16 @@ export class Messenger {
     if (!body) throw new Error('Empty message');
     if (body.length > MAX_TEXT_LENGTH) throw new MessageTooLongError();
     const now = this.now();
-    const message: Message = {
+    const ttl = this.disappear.seconds;
+    const message = newMessage({
       id: newMessageId(now),
       direction: 'out',
       body,
       replyTo: replyTo ?? null,
       sentAt: now,
-      receivedAt: null,
       status: 'pending',
-    };
+      expiresAt: ttl ? now + ttl * 1000 : null,
+    });
     await insertMessage(this.config.db, message);
     this.listener.messagesChanged?.();
     void this.flush();
@@ -191,8 +243,76 @@ export class Messenger {
     void this.sendEphemeral({ t: 'typing' });
   }
 
+  /** Sets our reaction (or removes it with null). */
+  async react(id: string, emoji: string | null): Promise<void> {
+    const message = await this.requireMessage(id);
+    if (message.kind !== 'text') throw new MessageActionError('not-found');
+    const at = this.now();
+    await setReaction(this.config.db, id, 'me', emoji, at);
+    this.listener.messagesChanged?.();
+    await this.queueControl({ t: 'react', id, emoji, at });
+  }
+
+  async edit(id: string, text: string): Promise<void> {
+    const body = text.trim();
+    if (!body) throw new Error('Empty message');
+    if (body.length > MAX_TEXT_LENGTH) throw new MessageTooLongError();
+    const message = await this.requireOwn(id);
+    const at = this.now();
+    if (at - message.sentAt > EDIT_WINDOW_MS) throw new MessageActionError('too-late');
+    await applyEdit(this.config.db, id, 'out', body, at);
+    this.listener.messagesChanged?.();
+    await this.queueControl({ t: 'edit', id, text: body, sentAt: message.sentAt, editedAt: at });
+  }
+
+  async deleteForEveryone(ids: string[]): Promise<void> {
+    const messages = await Promise.all(ids.map((id) => this.requireOwn(id)));
+    const at = this.now();
+    if (messages.some((m) => at - m.sentAt > DELETE_FOR_EVERYONE_WINDOW_MS)) {
+      throw new MessageActionError('too-late');
+    }
+    await markDeleted(this.config.db, ids, 'out', at);
+    this.listener.messagesChanged?.();
+    await this.queueControl({
+      t: 'delete',
+      items: messages.map((m) => ({ id: m.id, sentAt: m.sentAt })),
+    });
+  }
+
+  /** Removes messages from this phone only. */
+  async deleteForMe(ids: string[]): Promise<void> {
+    await hideMessages(this.config.db, ids);
+    this.listener.messagesChanged?.();
+  }
+
+  async setDisappearing(seconds: DisappearSeconds): Promise<void> {
+    if (!DISAPPEAR_OPTIONS.includes(seconds)) throw new Error('Unsupported timer');
+    const at = this.now();
+    await this.applyTimer({ seconds, at }, 'me');
+    await this.queueControl({ t: 'timer', seconds, at });
+  }
+
+  get disappearSeconds(): DisappearSeconds {
+    return this.disappear.seconds;
+  }
+
   currentPresence(): PeerPresence {
     return this.presence.current(this.now());
+  }
+
+  private async requireMessage(id: string): Promise<Message> {
+    const message = await getMessage(this.config.db, id);
+    if (!message) throw new MessageActionError('not-found');
+    if (message.deletedAt) throw new MessageActionError('deleted');
+    return message;
+  }
+
+  private async requireOwn(id: string): Promise<Message> {
+    const message = await this.requireMessage(id);
+    if (message.direction !== 'out' || message.kind !== 'text') {
+      throw new MessageActionError('not-own');
+    }
+    return message;
   }
 
   // --- outgoing -------------------------------------------------------------------------------
@@ -216,25 +336,35 @@ export class Messenger {
     }).catch(() => undefined);
   }
 
-  /** Sends due pending messages, one flush at a time. */
+  /** Durable control frames go through the outbox so they survive being offline. */
+  private async queueControl(frame: Frame) {
+    const at = this.now();
+    await enqueueOutbox(this.config.db, newMessageId(at), JSON.stringify(frame), at);
+    void this.flush();
+  }
+
+  /** Sends due pending messages and control frames, one flush at a time. */
   private flush(): Promise<void> {
     if (!this.running) return Promise.resolve();
-    this.flushing ??= this.flushOutbox().finally(() => {
+    this.flushing ??= this.flushAll().finally(() => {
       this.flushing = null;
     });
     return this.flushing;
   }
 
-  private async flushOutbox() {
+  private async flushAll() {
     const { db } = this.config;
     for (const message of await duePending(db, this.now())) {
       if (!this.running) return;
+      const ttl =
+        message.expiresAt !== null ? Math.round((message.expiresAt - message.sentAt) / 1000) : 0;
       const frame: MsgFrame = {
         t: 'msg',
         id: message.id,
         text: message.body,
         sentAt: message.sentAt,
         ...(message.replyTo ? { replyTo: message.replyTo } : {}),
+        ...(ttl > 0 ? { ttl } : {}),
       };
       const result = await this.publish(frame).catch(() => ({ ok: 0, failed: 1 }));
       if (result.ok > 0) {
@@ -244,6 +374,19 @@ export class Messenger {
       } else {
         await scheduleRetry(db, message.id, this.now(), retryDelay);
       }
+    }
+
+    // Control frames after messages, so an edit or reaction never overtakes its message.
+    for (const item of await dueOutbox(db, this.now())) {
+      if (!this.running) return;
+      const frame = parseFrame(JSON.parse(item.frame));
+      if (!frame) {
+        await removeOutbox(db, item.id);
+        continue;
+      }
+      const result = await this.publish(frame).catch(() => ({ ok: 0, failed: 1 }));
+      if (result.ok > 0) await removeOutbox(db, item.id);
+      else await retryOutbox(db, item.id, this.now(), retryDelay);
     }
   }
 
@@ -273,8 +416,11 @@ export class Messenger {
     const { db } = this.config;
     const now = this.now();
     const failed = await failStalePending(db, now - FAIL_AFTER_MS);
-    if (failed.length) this.listener.messagesChanged?.();
+    const expired = await purgeExpired(db, now);
+    if (failed.length || expired) this.listener.messagesChanged?.();
     await pruneSeenEvents(db, now - SEEN_EVENTS_TTL_MS);
+    await pruneTombstones(db, now - SEEN_EVENTS_TTL_MS);
+    await dropStaleOutbox(db, now - OUTBOX_TTL_MS);
     if (!this.confirmed) void this.sendHello();
     await this.flushReceipts();
     await this.flush();
@@ -308,9 +454,10 @@ export class Messenger {
         return;
 
       case 'msg': {
-        const isNew = !(await getMessage(db, frame.id));
-        if (isNew) {
-          await insertMessage(db, {
+        const expiresAt = frame.ttl ? frame.sentAt + frame.ttl * 1000 : null;
+        const inserted = await insertMessage(
+          db,
+          newMessage({
             id: frame.id,
             direction: 'in',
             body: frame.text,
@@ -318,10 +465,19 @@ export class Messenger {
             sentAt: frame.sentAt,
             receivedAt: now,
             status: 'received',
-          });
+            expiresAt,
+          }),
+        );
+        if (inserted) {
           this.presence.messageReceived();
-          this.listener.messagesChanged?.();
           this.emitPresence();
+        } else {
+          // An edit may have created the row first; add what only the original carries.
+          await completeIncoming(db, frame.id, frame.replyTo ?? null, expiresAt);
+        }
+        if (inserted || expiresAt !== null) {
+          await purgeExpired(db, now);
+          this.listener.messagesChanged?.();
         }
         // Acknowledge duplicates too: our earlier receipt may have been lost.
         this.pendingReceipts.delivered.add(frame.id);
@@ -333,6 +489,61 @@ export class Messenger {
         if ((await advanceOutgoing(db, frame.ids, frame.state)).length) {
           this.listener.messagesChanged?.();
         }
+        return;
+
+      case 'react':
+        if (await setReaction(db, frame.id, 'peer', frame.emoji, frame.at)) {
+          this.listener.messagesChanged?.();
+        }
+        return;
+
+      case 'edit': {
+        if (frame.editedAt - frame.sentAt > EDIT_WINDOW_MS + EDIT_SKEW_MS) return;
+        const created = await insertMessage(
+          db,
+          newMessage({
+            id: frame.id,
+            direction: 'in',
+            body: frame.text,
+            sentAt: frame.sentAt,
+            receivedAt: now,
+            status: 'received',
+            editedAt: frame.editedAt,
+          }),
+        );
+        if (created || (await applyEdit(db, frame.id, 'in', frame.text, frame.editedAt))) {
+          this.listener.messagesChanged?.();
+        }
+        return;
+      }
+
+      case 'delete':
+        for (const item of frame.items) {
+          // Not here yet: leave a tombstone so the late original can't appear.
+          await insertMessage(
+            db,
+            newMessage({
+              id: item.id,
+              direction: 'in',
+              body: '',
+              sentAt: item.sentAt,
+              receivedAt: now,
+              status: 'received',
+              deletedAt: now,
+            }),
+          );
+        }
+        await markDeleted(
+          db,
+          frame.items.map((i) => i.id),
+          'in',
+          now,
+        );
+        this.listener.messagesChanged?.();
+        return;
+
+      case 'timer':
+        await this.applyTimer({ seconds: frame.seconds, at: frame.at }, 'peer');
         return;
 
       case 'presence':
@@ -353,6 +564,29 @@ export class Messenger {
         this.emitPresence();
         return;
     }
+  }
+
+  /** Last change wins; each change leaves a notice in the chat, deduplicated by its id. */
+  private async applyTimer(setting: DisappearSetting, by: 'me' | 'peer') {
+    const { db } = this.config;
+    const notice: TimerNotice = { type: 'timer', seconds: setting.seconds, by };
+    await insertMessage(
+      db,
+      newMessage({
+        id: `timer:${by}:${setting.at}`,
+        direction: by === 'me' ? 'out' : 'in',
+        kind: 'system',
+        body: JSON.stringify(notice),
+        sentAt: setting.at,
+        status: by === 'me' ? 'sent' : 'read',
+      }),
+    );
+    if (setting.at > this.disappear.at) {
+      this.disappear = setting;
+      await setSetting(db, SETTING_DISAPPEAR, JSON.stringify(setting));
+      this.listener.disappearChanged?.(setting.seconds);
+    }
+    this.listener.messagesChanged?.();
   }
 
   private async synced() {
@@ -383,5 +617,16 @@ export class Messenger {
   private async persistLastSeen() {
     const at = this.presence.lastSeenAt;
     if (at !== null) await setSetting(this.config.db, SETTING_PEER_LAST_SEEN, String(at));
+  }
+}
+
+async function loadDisappear(db: Db): Promise<DisappearSetting> {
+  const raw = await getSetting(db, SETTING_DISAPPEAR);
+  if (!raw) return { seconds: 0, at: 0 };
+  try {
+    const value = JSON.parse(raw) as DisappearSetting;
+    return DISAPPEAR_OPTIONS.includes(value.seconds) ? value : { seconds: 0, at: 0 };
+  } catch {
+    return { seconds: 0, at: 0 };
   }
 }

@@ -85,10 +85,14 @@ presence + typing), schema v2 (messages, seen events), basic chat screen.
 typing, relays down → pending → delivered after restart, stranger wraps ignored. WebRTC PeerLink moved to
 Phase 4/5. Mailbox key rotation still in Phase 6.
 
-### Phase 3 — WhatsApp-style chat (≈2 weeks)
+### Phase 3 — WhatsApp-style chat (done)
 
-Chat header with presence, bubbles, ticks, typing indicator, date separators, swipe-to-reply, long-press menu (react, copy, edit, delete for both, forward-to-notes), emoji reactions, search, disappearing messages timer, unread counter, local notifications while app foreground only.
-**Done when**: full chat flow works on two iPhones; 10k-message history scrolls smoothly.
+FlashList history in pages of 50 with day separators and a jump-to-latest button; swipe-to-reply with quoted
+bubbles; long-press sheet (6 quick reactions, reply, copy, edit ≤ 15 min, delete for me, delete for everyone
+≤ 48 h); disappearing messages (off / 24 h / 7 d / 90 d, shared setting with in-chat notices, expired messages
+purged on both phones); search with highlighted matches that jumps to the message. New frames `react`, `edit`,
+`delete`, `timer` (+ `ttl` on `msg`) go through a persistent outbox and are applied last-writer-wins, so they give
+the right result even when relays deliver them before the message they refer to (tested). Schema v3.
 
 ### Phase 4 — Media, docs, voice notes, location (≈2 weeks)
 

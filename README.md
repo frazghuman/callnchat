@@ -5,8 +5,9 @@ owned server. Messages travel as end-to-end encrypted events through public Nost
 files will go directly phone-to-phone over WebRTC.
 Full roadmap: [docs/PLAN.md](docs/PLAN.md).
 
-Status: **Phase 2 — messaging over Nostr** (encrypted text messages with sent/delivered/read ticks,
-online / last seen / typing, offline delivery via relays). WhatsApp-style polish is Phase 3.
+Status: **Phase 3 — WhatsApp-style chat** (replies, reactions, edit, delete for me / everyone,
+disappearing messages, search, day separators, paged history) on top of encrypted Nostr messaging.
+Next: photos, documents, voice notes and location (Phase 4).
 
 ## Stack
 

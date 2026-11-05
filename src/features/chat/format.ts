@@ -35,3 +35,47 @@ export function presenceLabel(
   if (presence.state === 'online') return presence.typing ? 'typing…' : 'online';
   return presence.lastSeen ? formatLastSeen(presence.lastSeen, now) : '';
 }
+
+const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+/** Day separator label, WhatsApp style: Today, Yesterday, weekday this week, then the date. */
+export function formatDay(ms: number, now: number): string {
+  const days = Math.round((startOfDay(now) - startOfDay(ms)) / 86_400_000);
+  if (days <= 0) return 'Today';
+  if (days === 1) return 'Yesterday';
+  const d = new Date(ms);
+  if (days < 7) return WEEKDAYS[d.getDay()]!;
+  const sameYear = d.getFullYear() === new Date(now).getFullYear();
+  return `${d.getDate()} ${MONTHS[d.getMonth()]}${sameYear ? '' : ` ${d.getFullYear()}`}`;
+}
+
+export function dayKey(ms: number): number {
+  return startOfDay(ms);
+}
+
+export function disappearLabel(seconds: number): string {
+  switch (seconds) {
+    case 86_400:
+      return '24 hours';
+    case 604_800:
+      return '7 days';
+    case 7_776_000:
+      return '90 days';
+    default:
+      return 'Off';
+  }
+}
+
+/** Text for a system row (currently only disappearing-timer changes). */
+export function systemNoticeText(body: string, peerName: string): string {
+  try {
+    const notice = JSON.parse(body) as { type: string; seconds: number; by: 'me' | 'peer' };
+    if (notice.type !== 'timer') return '';
+    const who = notice.by === 'me' ? 'You' : peerName;
+    return notice.seconds
+      ? `${who} turned on disappearing messages. New messages will disappear ${disappearLabel(notice.seconds)} after they're sent.`
+      : `${who} turned off disappearing messages.`;
+  } catch {
+    return '';
+  }
+}

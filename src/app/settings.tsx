@@ -1,9 +1,20 @@
 import { router } from 'expo-router';
 import { useState } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
+import {
+  ActionSheetIOS,
+  Alert,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Switch,
+  Text,
+  View,
+} from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { DISAPPEAR_OPTIONS } from '@/core/protocol/frames';
 import { useChatStore } from '@/features/chat/chatStore';
+import { disappearLabel } from '@/features/chat/format';
 import { authenticate } from '@/features/lock/biometrics';
 import { MyCodeCard } from '@/features/session/components/MyCodeCard';
 import { useSessionStore } from '@/features/session/sessionStore';
@@ -17,6 +28,7 @@ export default function SettingsScreen() {
   const setAppLock = useSessionStore((s) => s.setAppLock);
   const reset = useSessionStore((s) => s.reset);
   const [busy, setBusy] = useState(false);
+  const disappear = useChatStore((s) => s.disappear);
 
   if (!session) return null;
   const rowStyle = [styles.row, { backgroundColor: colors.surface, borderRadius: radius.card }];
@@ -31,6 +43,28 @@ export default function SettingsScreen() {
       if (result !== 'ok') return;
     }
     await setAppLock(enabled);
+  }
+
+  function chooseDisappearing() {
+    const labels = DISAPPEAR_OPTIONS.map(disappearLabel);
+    ActionSheetIOS.showActionSheetWithOptions(
+      {
+        title: 'Disappearing messages',
+        message: 'New messages disappear for both of you after the chosen time.',
+        options: [...labels, 'Cancel'],
+        cancelButtonIndex: labels.length,
+      },
+      (index) => {
+        const seconds = DISAPPEAR_OPTIONS[index];
+        if (seconds === undefined || seconds === disappear) return;
+        useChatStore
+          .getState()
+          .setDisappearing(seconds)
+          .catch((e: unknown) =>
+            Alert.alert("Couldn't change", e instanceof Error ? e.message : String(e)),
+          );
+      },
+    );
   }
 
   function confirmReset() {
@@ -76,6 +110,13 @@ export default function SettingsScreen() {
           <Text style={{ color: session.peer.verifiedAt ? colors.accent : colors.textMuted }}>
             {session.peer.verifiedAt ? '✓ Verified' : 'Not verified ›'}
           </Text>
+        </Pressable>
+      ) : null}
+
+      {session.peer ? (
+        <Pressable style={[rowStyle, styles.inline]} onPress={chooseDisappearing}>
+          <Text style={{ color: colors.text, fontSize: font.body }}>Disappearing messages</Text>
+          <Text style={{ color: colors.textMuted }}>{disappearLabel(disappear)} ›</Text>
         </Pressable>
       ) : null}
 

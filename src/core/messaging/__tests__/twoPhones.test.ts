@@ -9,88 +9,28 @@ import {
 import { generateSecretKey } from 'nostr-tools/pure';
 import WebSocket from 'ws';
 
-import { bytesToHex } from '@/core/crypto/bytes';
 import { sealFrame } from '@/core/nostr/envelope';
-import { createRelayTransport } from '@/core/nostr/relayPool';
 import { newMessageId } from '@/core/protocol/ids';
-import { listMessages, type Message } from '@/data/messages';
-import { createMemorySecretStore } from '@/data/secretStore';
-import { addPeer, loadSession, updateProfile, type Session } from '@/features/session/session';
 
 import { startLocalRelay, type LocalRelay } from '../../../../test/localRelay';
-import { createNodeSqliteDb } from '../../../../test/nodeSqliteDb';
-import { Messenger } from '../messenger';
-import type { PeerPresence } from '../presence';
+import {
+  createPhone as makePhone,
+  createSessions,
+  waitFor,
+  type Phone,
+} from '../../../../test/phones';
+import type { Session } from '@/features/session/session';
 
 setWebSocketImplementation(WebSocket);
 jest.setTimeout(20_000);
 
-type Phone = {
-  session: Session;
-  messenger: Messenger;
-  presence: PeerPresence | null;
-  confirmedAt: number | null;
-  messages(): Promise<Message[]>;
-};
-
 let relays: LocalRelay[] = [];
 
-async function waitFor(check: () => boolean | Promise<boolean>, timeoutMs = 5_000) {
-  const start = Date.now();
-  while (!(await check())) {
-    if (Date.now() - start > timeoutMs) throw new Error('waitFor timed out');
-    await new Promise((r) => setTimeout(r, 25));
-  }
-}
-
-async function createSessions(): Promise<[Session, Session]> {
-  const device = async (name: string) => {
-    const db = createNodeSqliteDb();
-    const services = { secrets: createMemorySecretStore(), openDb: async () => db, now: Date.now };
-    return { session: await updateProfile(await loadSession(services), name), services };
-  };
-  const a = await device('Alice');
-  const b = await device('Bob');
-  const alice = await addPeer(a.session, a.services, b.session.ownCodeText, 'Bob');
-  const bob = await addPeer(b.session, b.services, a.session.ownCodeText, 'Alice');
-  return [alice, bob];
-}
-
-function createPhone(session: Session): Phone {
-  const phone: Phone = {
+const createPhone = (session: Session) =>
+  makePhone(
     session,
-    presence: null,
-    confirmedAt: session.peer!.confirmedAt,
-    messages: () => listMessages(session.db, 100),
-    messenger: null as unknown as Messenger,
-  };
-  phone.messenger = new Messenger(
-    {
-      transport: createRelayTransport(
-        relays.map((r) => r.url),
-        session.identity.secretKey,
-        { retryDelaysMs: [100], publishTimeoutMs: 1_000 },
-      ),
-      db: session.db,
-      secretKey: session.identity.secretKey,
-      publicKeyHex: bytesToHex(session.identity.publicKey),
-      profileName: session.profile!.displayName,
-      peer: {
-        publicKeyHex: session.peer!.publicKey,
-        pairSecretHex: session.peer!.pairSecret,
-        confirmed: session.peer!.confirmedAt !== null,
-      },
-      heartbeatMs: 200,
-      tickMs: 200,
-      receiptDebounceMs: 20,
-    },
-    {
-      presenceChanged: (p) => (phone.presence = p),
-      peerConfirmed: (at) => (phone.confirmedAt = at),
-    },
+    relays.map((r) => r.url),
   );
-  return phone;
-}
 
 const statusOf = async (phone: Phone, id: string) =>
   (await phone.messages()).find((m) => m.id === id)?.status;
