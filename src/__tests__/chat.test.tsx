@@ -64,7 +64,9 @@ beforeEach(async () => {
     .pair(encodePairingCode({ publicKey: bob.publicKey, secret: randomBytes(32) }), 'Bob');
   const fake = fakeTransport();
   deliver = fake.deliver;
-  await useChatStore.getState().start(useSessionStore.getState().session!, fake.transport);
+  await useChatStore
+    .getState()
+    .start(useSessionStore.getState().session!, { transport: fake.transport, transfer: null });
 });
 
 afterEach(async () => {
@@ -140,4 +142,39 @@ it('finds a message in search', async () => {
   await waitFor(() => expect(screen).toHavePathname('/search'));
   await fireEvent.changeText(screen.getByLabelText('Search messages'), 'pancake');
   expect(await screen.findByText('pancake')).toBeTruthy();
+});
+
+it('shows an incoming document waiting for the sender, and a location pin', async () => {
+  await renderRouter(routes, { initialUrl: '/chat' });
+  const fileId = newMessageId(Date.now());
+  await fromBob({
+    t: 'msg',
+    id: fileId,
+    text: '',
+    sentAt: Date.now(),
+    file: {
+      kind: 'file',
+      name: 'contract.pdf',
+      mime: 'application/pdf',
+      size: 2_500_000,
+      sha256: 'a'.repeat(64),
+    },
+  });
+  expect(await screen.findByLabelText('Document contract.pdf, 2.4 MB')).toBeTruthy();
+  expect(screen.getByText('Downloads when Bob opens the app')).toBeTruthy();
+
+  // Attachments can be reacted to and replied to, but not edited.
+  await fireEvent(screen.getByLabelText(/^Bob: 📄 contract\.pdf/), 'longPress');
+  expect(await screen.findByText('Reply')).toBeTruthy();
+  expect(screen.queryByText('Edit')).toBeNull();
+  await fireEvent.press(screen.getByLabelText('Close'));
+
+  await fromBob({
+    t: 'msg',
+    id: newMessageId(Date.now()),
+    text: '',
+    sentAt: Date.now(),
+    loc: { lat: 31.52, lng: 74.35 },
+  });
+  expect(await screen.findByLabelText('📍 Location')).toBeTruthy();
 });

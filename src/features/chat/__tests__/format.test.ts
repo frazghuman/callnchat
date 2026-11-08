@@ -1,4 +1,10 @@
-import { formatLastSeen, presenceLabel } from '../format';
+import {
+  formatBytes,
+  formatDuration,
+  formatLastSeen,
+  presenceLabel,
+  transferLabel,
+} from '../format';
 
 const at = (y: number, mo: number, d: number, h: number, mi: number) =>
   new Date(y, mo - 1, d, h, mi).getTime();
@@ -17,5 +23,43 @@ describe('presenceLabel', () => {
     expect(formatLastSeen(at(2026, 11, 2, 9, 5), now)).toBe('last seen today at 09:05');
     expect(formatLastSeen(at(2026, 11, 1, 23, 59), now)).toBe('last seen yesterday at 23:59');
     expect(formatLastSeen(at(2026, 10, 28, 7, 30), now)).toBe('last seen 28 Oct at 07:30');
+  });
+});
+
+describe('transferLabel', () => {
+  const base = {
+    direction: 'in' as const,
+    size: 1000,
+    bytes: 0,
+    peerOnline: true,
+    unreachable: false,
+    peerName: 'Bob',
+  };
+
+  it('says nothing once a file is done, and explains waiting and failure', () => {
+    expect(transferLabel({ ...base, state: 'done' })).toBeNull();
+    expect(transferLabel({ ...base, state: 'pending', peerOnline: false })).toBe(
+      'Downloads when Bob opens the app',
+    );
+    expect(transferLabel({ ...base, direction: 'out', state: 'pending', peerOnline: false })).toBe(
+      'Sends when Bob opens the app',
+    );
+    expect(transferLabel({ ...base, state: 'failed' })).toBe("Couldn't download this file");
+    expect(transferLabel({ ...base, state: 'pending', unreachable: true })).toMatch(/directly/);
+  });
+
+  it('shows progress, never 100% before the hash check', () => {
+    expect(transferLabel({ ...base, state: 'active', bytes: 450 })).toBe('Downloading 45%');
+    expect(transferLabel({ ...base, state: 'active', bytes: 1000 })).toBe('Downloading 99%');
+    expect(transferLabel({ ...base, direction: 'out', state: 'pending', bytes: 100 })).toBe(
+      'Sending 10%',
+    );
+  });
+
+  it('formats sizes and durations', () => {
+    expect(formatBytes(900)).toBe('900 B');
+    expect(formatBytes(2_500)).toBe('2 KB');
+    expect(formatBytes(3_500_000)).toBe('3.3 MB');
+    expect(formatDuration(65_400)).toBe('1:05');
   });
 });

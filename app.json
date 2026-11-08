@@ -29,17 +29,45 @@
         }
       ],
       [
+        "expo-local-authentication",
+        {
+          "faceIDPermission": "Unlock CallNChat with Face ID."
+        }
+      ],
+      [
         "expo-camera",
         {
-          "cameraPermission": "Scan your contact's pairing code. Video calls use the camera too.",
-          "microphonePermission": "Voice and video calls with your contact.",
+          "cameraPermission": "Take photos and videos to send, scan pairing codes, and make video calls.",
+          "microphonePermission": "Record voice messages and make calls with your contact.",
           "recordAudioAndroid": false
         }
       ],
       [
-        "expo-local-authentication",
+        "expo-image-picker",
         {
-          "faceIDPermission": "Unlock CallNChat with Face ID."
+          "photosPermission": "Choose photos and videos to send to your contact.",
+          "cameraPermission": "Take photos and videos to send, scan pairing codes, and make video calls.",
+          "microphonePermission": "Record voice messages and make calls with your contact."
+        }
+      ],
+      [
+        "expo-audio",
+        {
+          "microphonePermission": "Record voice messages and make calls with your contact."
+        }
+      ],
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Share your location with your contact when you choose to."
+        }
+      ],
+      "expo-video",
+      [
+        "@config-plugins/react-native-webrtc",
+        {
+          "cameraPermission": "Take photos and videos to send, scan pairing codes, and make video calls.",
+          "microphonePermission": "Record voice messages and make calls with your contact."
         }
       ]
     ],

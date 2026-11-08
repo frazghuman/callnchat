@@ -1,7 +1,7 @@
 import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import type { ChatMessage } from '@/data/messages';
+import { previewText, type ChatMessage } from '@/data/messages';
 import { useTheme } from '@/ui/theme';
 
 export const QUICK_REACTIONS = ['👍', '❤️', '😂', '😮', '😢', '🙏'] as const;
@@ -57,7 +57,7 @@ export function MessageActions({ target, onClose, ...actions }: Props) {
           ]}
         >
           <Text numberOfLines={3} style={[styles.preview, { color: colors.textMuted }]}>
-            {target?.message.body}
+            {target ? previewText(target.message) : ''}
           </Text>
 
           <View style={[styles.emojiRow, { backgroundColor: colors.surface }]}>

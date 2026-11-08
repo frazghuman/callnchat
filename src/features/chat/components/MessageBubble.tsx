@@ -1,10 +1,12 @@
 import { memo } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
-import type { ChatMessage, Message } from '@/data/messages';
+import { previewText, type ChatMessage, type Message } from '@/data/messages';
 import { useTheme } from '@/ui/theme';
 
 import { formatTime, systemNoticeText } from '../format';
+
+import { AttachmentView } from './AttachmentView';
 
 const TICKS: Record<Message['status'], string> = {
   pending: '🕓',
@@ -30,6 +32,7 @@ type Props = {
   highlighted?: boolean;
   onLongPress?: (message: ChatMessage) => void;
   onQuotePress?: (id: string) => void;
+  onOpenAttachment?: (message: ChatMessage) => void;
 };
 
 export const MessageBubble = memo(function MessageBubble({
@@ -38,6 +41,7 @@ export const MessageBubble = memo(function MessageBubble({
   highlighted,
   onLongPress,
   onQuotePress,
+  onOpenAttachment,
 }: Props) {
   const { colors, radius, font } = useTheme();
 
@@ -76,7 +80,7 @@ export const MessageBubble = memo(function MessageBubble({
 
   const label = deleted
     ? 'Deleted message'
-    : `${outgoing ? 'You' : peerName}: ${message.body}. ${formatTime(message.sentAt)}${
+    : `${outgoing ? 'You' : peerName}: ${previewText(message)}. ${formatTime(message.sentAt)}${
         message.editedAt ? ', edited' : ''
       }${outgoing ? `, ${STATUS_LABEL[message.status]}` : ''}`;
 
@@ -122,7 +126,16 @@ export const MessageBubble = memo(function MessageBubble({
               🚫 {outgoing ? 'You deleted this message' : 'This message was deleted'}
             </Text>
           ) : (
-            <Text style={{ color: colors.text, fontSize: font.body }}>{message.body}</Text>
+            <>
+              <AttachmentView
+                message={message}
+                peerName={peerName}
+                onOpen={(m) => onOpenAttachment?.(m)}
+              />
+              {message.body ? (
+                <Text style={{ color: colors.text, fontSize: font.body }}>{message.body}</Text>
+              ) : null}
+            </>
           )}
 
           <View style={styles.meta}>

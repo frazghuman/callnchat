@@ -94,10 +94,16 @@ purged on both phones); search with highlighted matches that jumps to the messag
 `delete`, `timer` (+ `ttl` on `msg`) go through a persistent outbox and are applied last-writer-wins, so they give
 the right result even when relays deliver them before the message they refer to (tested). Schema v3.
 
-### Phase 4 — Media, docs, voice notes, location (≈2 weeks)
+### Phase 4 — Media, documents, voice notes, location (done)
 
-expo-image-picker (photos/videos with compression), expo-document-picker, chunked transfer (16 KB chunks, backpressure via `bufferedAmountLowThreshold`, SHA-256 verify, resume), gallery viewer, voice notes (expo-audio record/playback, waveform), location pin + live location (expo-location, react-native-maps/Apple Maps, auto-expiry 15m/1h/8h).
-**Done when**: 200 MB video transfers with resume after app background/foreground; live location updates on both sides.
+Direct WebRTC data channel (react-native-webrtc; signaling as sealed ephemeral Nostr frames, lower public key
+offers; free STUN only, no TURN). Receiver-driven, resumable 16 KiB-chunk transfers with backpressure; a file is
+accepted only if its SHA-256 matches the signed message. Files move only while both apps are open — the bubble
+says so. Photos compressed to 1600 px JPEG with a ~2 KB blurred preview inside the message; videos and documents
+up to 100 MB sent as-is; hold-to-record voice notes (AAC) with 1×/1.5×/2× playback; location pin or live
+location (15 min / 1 h / 8 h, updates while the sharer's app is open) on Apple Maps. Deleting or expiry removes
+stored files. Tested over real WebRTC between two simulated phones (transfer, offline wait, resume, hash
+mismatch, deletes, expiry, location).
 
 ### Phase 5 — Voice & video calls (≈2 weeks)
 

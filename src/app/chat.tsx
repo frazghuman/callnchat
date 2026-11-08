@@ -1,6 +1,8 @@
 import { FlashList, type FlashListRef } from '@shopify/flash-list';
 import * as Clipboard from 'expo-clipboard';
+import { File } from 'expo-file-system';
 import * as Haptics from 'expo-haptics';
+import * as Sharing from 'expo-sharing';
 import { router, Stack, useFocusEffect } from 'expo-router';
 import { useHeaderHeight } from 'expo-router/react-navigation';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -17,6 +19,8 @@ import {
 
 import { DELETE_FOR_EVERYONE_WINDOW_MS, EDIT_WINDOW_MS } from '@/core/protocol/frames';
 import type { ChatMessage } from '@/data/messages';
+import { showAttachMenu } from '@/features/attachments/attachMenu';
+import { prepareVoiceNote } from '@/features/attachments/prepare';
 import { useChatStore } from '@/features/chat/chatStore';
 import { ChatHeaderTitle } from '@/features/chat/components/ChatHeaderTitle';
 import { Composer } from '@/features/chat/components/Composer';
@@ -106,9 +110,10 @@ export default function ChatScreen() {
     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     const age = Date.now() - message.sentAt;
     const own = message.direction === 'out';
+    const plainText = !message.attachment && !message.location;
     setTarget({
       message,
-      canEdit: own && age <= EDIT_WINDOW_MS,
+      canEdit: own && plainText && age <= EDIT_WINDOW_MS,
       canDeleteForEveryone: own && age <= DELETE_FOR_EVERYONE_WINDOW_MS,
     });
   }, []);
@@ -123,6 +128,22 @@ export default function ChatScreen() {
     },
     [store],
   );
+
+  const openAttachment = useCallback((message: ChatMessage) => {
+    if (message.location) {
+      router.push({ pathname: '/location/[id]', params: { id: message.id } });
+      return;
+    }
+    const kind = message.attachment?.kind;
+    if (kind === 'image' || kind === 'video') {
+      router.push({ pathname: '/media/[id]', params: { id: message.id } });
+      return;
+    }
+    const uri = useChatStore.getState().fileUri(message);
+    if (!uri) return;
+    // Quick Look where iOS can show the file, otherwise the share sheet ("Open in…").
+    new File(uri).preview().catch(() => Sharing.shareAsync(uri));
+  }, []);
 
   if (!peer) return null;
 
@@ -210,6 +231,7 @@ export default function ChatScreen() {
                   highlighted={item.key === highlightId}
                   onLongPress={openActions}
                   onQuotePress={jumpTo}
+                  onOpenAttachment={openAttachment}
                 />
               </SwipeToReply>
             )
@@ -267,6 +289,17 @@ export default function ChatScreen() {
         onSubmitEdit={(text) => void attempt("Couldn't edit", () => store().submitEdit(text))}
         onCancel={() => (editing ? store().setEditing(null) : store().setReplyTo(null))}
         onTyping={() => store().typing()}
+        onAttach={() =>
+          showAttachMenu({
+            send: (prepared) => store().sendAttachment(prepared),
+            sendLocation: (minutes) => store().sendLocation(minutes),
+          })
+        }
+        onVoiceNote={(uri, ms) =>
+          void attempt("Couldn't send voice message", async () =>
+            store().sendAttachment(await prepareVoiceNote(uri, ms)),
+          )
+        }
       />
 
       <MessageActions

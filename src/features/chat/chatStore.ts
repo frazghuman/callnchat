@@ -4,8 +4,14 @@ import { bytesToHex } from '@/core/crypto/bytes';
 import { Messenger } from '@/core/messaging/messenger';
 import type { PeerPresence } from '@/core/messaging/presence';
 import { createRelayTransport, DEFAULT_RELAYS, type RelayTransport } from '@/core/nostr/relayPool';
+import { DEFAULT_ICE_SERVERS } from '@/core/rtc/types';
 import type { DisappearSeconds } from '@/core/protocol/frames';
+import type { LinkStatus, TransferConfig } from '@/core/transfer/transferManager';
+import { expoFileStore } from '@/data/expoFileStore';
 import { listMessages, searchMessages, type ChatMessage } from '@/data/messages';
+import type { PreparedAttachment } from '@/features/attachments/prepare';
+import { currentPosition, watchPosition } from '@/features/location/location';
+import { nativeRtc } from '@/features/transfer/nativeRtc';
 import type { Session } from '@/features/session/session';
 
 export const PAGE_SIZE = 50;
@@ -27,9 +33,15 @@ type ChatState = {
   editing: ChatMessage | null;
   /** Message to scroll to and flash briefly (from search or a tapped reply quote). */
   highlightId: string | null;
+  /** Live bytes moved per attachment while a transfer runs. */
+  progress: Record<string, number>;
+  linkStatus: LinkStatus;
 
-  /** `transport` is for tests; the app connects to the default relays. */
-  start(session: Session, transport?: RelayTransport): Promise<void>;
+  /** Overrides are for tests; the app connects to the default relays and uses WebRTC. */
+  start(
+    session: Session,
+    deps?: { transport?: RelayTransport; transfer?: TransferConfig | null },
+  ): Promise<void>;
   stop(): Promise<void>;
   loadOlder(): Promise<void>;
   send(text: string): Promise<void>;
@@ -38,6 +50,11 @@ type ChatState = {
   deleteForEveryone(id: string): Promise<void>;
   deleteForMe(id: string): Promise<void>;
   setDisappearing(seconds: DisappearSeconds): Promise<void>;
+  sendAttachment(prepared: PreparedAttachment, caption?: string): Promise<void>;
+  /** 0 sends a pin; otherwise live location for that many minutes. */
+  sendLocation(liveMinutes: number): Promise<void>;
+  stopLiveLocation(id: string): Promise<void>;
+  fileUri(message: ChatMessage): string | null;
   markRead(): Promise<void>;
   typing(): void;
   search(query: string): Promise<ChatMessage[]>;
@@ -50,6 +67,30 @@ type ChatState = {
 
 let messenger: Messenger | null = null;
 let activeSession: Session | null = null;
+/** Our running live-location share: position updates are sent while the app is open. */
+let liveWatch: { id: string; until: number; sub: { remove(): void } | null } | null = null;
+
+function stopWatching() {
+  liveWatch?.sub?.remove();
+  liveWatch = null;
+}
+
+async function watchLive(id: string, until: number) {
+  stopWatching();
+  const watch: NonNullable<typeof liveWatch> = { id, until, sub: null };
+  liveWatch = watch;
+  const sub = await watchPosition((position) => {
+    if (!messenger || Date.now() > until) {
+      if (liveWatch === watch) stopWatching();
+      return;
+    }
+    void messenger.updateLiveLocation(id, position).then((applied) => {
+      if (!applied && liveWatch === watch) stopWatching();
+    });
+  });
+  if (liveWatch === watch) watch.sub = sub;
+  else sub.remove();
+}
 
 function requireMessenger(): Messenger {
   if (!messenger) throw new Error('Not connected');
@@ -77,15 +118,22 @@ export const useChatStore = create<ChatState>((set, get) => {
     replyTo: null,
     editing: null,
     highlightId: null,
+    progress: {},
+    linkStatus: 'idle',
 
-    async start(session, transport) {
+    async start(session, deps = {}) {
       if (messenger || !session.peer || !session.profile) return;
       activeSession = session;
       set({ confirmedAt: session.peer.confirmedAt, running: true });
 
       messenger = new Messenger(
         {
-          transport: transport ?? createRelayTransport(DEFAULT_RELAYS, session.identity.secretKey),
+          transport:
+            deps.transport ?? createRelayTransport(DEFAULT_RELAYS, session.identity.secretKey),
+          transfer:
+            deps.transfer === undefined
+              ? { store: expoFileStore, rtc: nativeRtc, iceServers: DEFAULT_ICE_SERVERS }
+              : (deps.transfer ?? undefined),
           db: session.db,
           secretKey: session.identity.secretKey,
           publicKeyHex: bytesToHex(session.identity.publicKey),
@@ -102,16 +150,33 @@ export const useChatStore = create<ChatState>((set, get) => {
           connectionChanged: (connectedRelays) => set({ connectedRelays, statusAt: Date.now() }),
           peerConfirmed: (confirmedAt) => set({ confirmedAt }),
           disappearChanged: (disappear) => set({ disappear }),
+          transferProgress: (id, bytes) =>
+            set((state) => ({ progress: { ...state.progress, [id]: bytes } })),
+          linkStatus: (linkStatus) => set({ linkStatus }),
         },
       );
       await reload();
       await messenger.start();
+
+      // Resume our own live location if it is still running.
+      const now = Date.now();
+      const live = get().messages.find(
+        (m) =>
+          m.direction === 'out' &&
+          m.location?.liveUntil &&
+          m.location.liveUntil > now &&
+          !m.location.endedAt,
+      );
+      if (live?.location?.liveUntil) {
+        watchLive(live.id, live.location.liveUntil).catch(() => undefined);
+      }
     },
 
     async stop() {
       const current = messenger;
       messenger = null;
-      set({ running: false, connectedRelays: 0 });
+      stopWatching();
+      set({ running: false, connectedRelays: 0, linkStatus: 'idle' });
       await current?.stop();
       // A quick background → foreground may have started a new messenger meanwhile.
       if (!messenger) activeSession = null;
@@ -155,6 +220,37 @@ export const useChatStore = create<ChatState>((set, get) => {
 
     async setDisappearing(seconds) {
       await requireMessenger().setDisappearing(seconds);
+    },
+
+    async sendAttachment({ id, attachment }, caption = '') {
+      const replyTo = get().replyTo;
+      set({ replyTo: null });
+      await requireMessenger().sendFile(id, attachment, caption, replyTo?.id);
+    },
+
+    async sendLocation(liveMinutes) {
+      const position = await currentPosition();
+      const replyTo = get().replyTo;
+      set({ replyTo: null });
+      const liveUntil = liveMinutes > 0 ? Date.now() + liveMinutes * 60_000 : undefined;
+      const message = await requireMessenger().sendLocation(
+        { ...position, ...(liveUntil ? { liveUntil } : {}) },
+        replyTo?.id,
+      );
+      if (liveUntil) await watchLive(message.id, liveUntil);
+    },
+
+    async stopLiveLocation(id) {
+      if (liveWatch?.id === id) stopWatching();
+      await requireMessenger().stopLiveLocation(id);
+    },
+
+    fileUri(message) {
+      const file = message.attachment;
+      if (!file) return null;
+      // Ours are complete from the start; theirs once the transfer finished and verified.
+      if (message.direction === 'in' && message.transferState !== 'done') return null;
+      return expoFileStore.uri(message.id, file.name);
     },
 
     async markRead() {

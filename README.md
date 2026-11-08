@@ -5,9 +5,9 @@ owned server. Messages travel as end-to-end encrypted events through public Nost
 files will go directly phone-to-phone over WebRTC.
 Full roadmap: [docs/PLAN.md](docs/PLAN.md).
 
-Status: **Phase 3 — WhatsApp-style chat** (replies, reactions, edit, delete for me / everyone,
-disappearing messages, search, day separators, paged history) on top of encrypted Nostr messaging.
-Next: photos, documents, voice notes and location (Phase 4).
+Status: **Phase 4 — photos, videos, documents, voice notes, location.** Files go directly
+phone-to-phone over WebRTC while both apps are open (resumable, SHA-256 checked); location pins and live
+location go over Nostr. Next: voice and video calls (Phase 5).
 
 ## Stack
 

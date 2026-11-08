@@ -47,6 +47,15 @@ export default function RootLayout() {
         <Stack.Screen name="verify" options={{ title: 'Verify security' }} />
         <Stack.Screen name="chat" options={{ headerBackVisible: false }} />
         <Stack.Screen name="search" options={{ title: 'Search' }} />
+        <Stack.Screen
+          name="media/[id]"
+          options={{
+            title: '',
+            headerStyle: { backgroundColor: '#000000' },
+            headerTintColor: '#FFFFFF',
+          }}
+        />
+        <Stack.Screen name="location/[id]" options={{ title: 'Location' }} />
         <Stack.Screen name="settings" options={{ title: 'Settings' }} />
       </Stack>
       {locked ? <LockScreen /> : null}

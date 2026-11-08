@@ -94,6 +94,28 @@ const toMessage = (r: MessageRow): Message => ({
   location: parseJson<StoredLocation>(r.location),
 });
 
+/** One-line description for quotes, previews and screen readers. */
+export function previewText(m: {
+  body: string;
+  attachment: Attachment | null;
+  location: StoredLocation | null;
+}): string {
+  if (m.body) return m.body;
+  if (m.location) return m.location.liveUntil ? '📍 Live location' : '📍 Location';
+  switch (m.attachment?.kind) {
+    case 'image':
+      return '📷 Photo';
+    case 'video':
+      return '🎥 Video';
+    case 'audio':
+      return '🎤 Voice message';
+    case 'file':
+      return `📄 ${m.attachment.name}`;
+    default:
+      return '';
+  }
+}
+
 const placeholders = (n: number) => Array.from({ length: n }, () => '?').join(', ');
 
 /** Defaults for the optional parts of a new row. */
@@ -212,8 +234,10 @@ async function decorate(db: Db, messages: Message[]): Promise<ChatMessage[]> {
         body: string;
         deleted_at: number | null;
         hidden: number;
+        attachment: string | null;
+        location: string | null;
       }>(
-        `SELECT id, direction, body, deleted_at, hidden FROM messages
+        `SELECT id, direction, body, deleted_at, hidden, attachment, location FROM messages
          WHERE id IN (${placeholders(replyIds.length)})`,
         replyIds,
       )
@@ -232,7 +256,14 @@ async function decorate(db: Db, messages: Message[]): Promise<ChatMessage[]> {
         ? {
             id: target.id,
             direction: target.direction,
-            body: target.hidden || target.deleted_at ? '' : target.body,
+            body:
+              target.hidden || target.deleted_at
+                ? ''
+                : previewText({
+                    body: target.body,
+                    attachment: parseJson<Attachment>(target.attachment),
+                    location: parseJson<StoredLocation>(target.location),
+                  }),
             deleted: !!(target.hidden || target.deleted_at),
           }
         : null,

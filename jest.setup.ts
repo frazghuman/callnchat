@@ -9,3 +9,40 @@ jest.mock('react-native-gesture-handler/ReanimatedSwipeable', () => {
     }),
   };
 });
+
+// Native-only modules the chat screen imports. Screen tests run without the direct file link
+// (transfer: null), so these only need to load.
+jest.mock('react-native-webrtc', () => ({
+  RTCPeerConnection: jest.fn(),
+  RTCIceCandidate: jest.fn(),
+}));
+jest.mock('react-native-maps', () => {
+  const { View } = jest.requireActual<typeof import('react-native')>('react-native');
+  return { __esModule: true, default: View, Marker: View };
+});
+jest.mock('expo-audio', () => {
+  const player = {
+    play: jest.fn(),
+    pause: jest.fn(),
+    seekTo: jest.fn(),
+    setPlaybackRate: jest.fn(),
+  };
+  return {
+    RecordingPresets: { HIGH_QUALITY: {} },
+    requestRecordingPermissionsAsync: jest.fn(async () => ({ granted: true })),
+    setAudioModeAsync: jest.fn(async () => undefined),
+    useAudioRecorder: () => ({
+      prepareToRecordAsync: jest.fn(async () => undefined),
+      record: jest.fn(),
+      stop: jest.fn(async () => undefined),
+      uri: null,
+    }),
+    useAudioPlayer: () => player,
+    useAudioPlayerStatus: () => ({
+      playing: false,
+      currentTime: 0,
+      duration: 0,
+      didJustFinish: false,
+    }),
+  };
+});

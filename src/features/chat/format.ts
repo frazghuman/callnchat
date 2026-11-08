@@ -79,3 +79,43 @@ export function systemNoticeText(body: string, peerName: string): string {
     return '';
   }
 }
+
+export function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / 1024 / 1024).toFixed(bytes < 10 * 1024 * 1024 ? 1 : 0)} MB`;
+}
+
+export function formatDuration(ms: number): string {
+  const total = Math.max(0, Math.round(ms / 1000));
+  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`;
+}
+
+/**
+ * Status line under an attachment that isn't usable yet, or null when there is nothing to say.
+ * Files only move while both apps are open, so "waiting" states are spelled out.
+ */
+export function transferLabel(input: {
+  direction: 'in' | 'out';
+  state: 'pending' | 'active' | 'done' | 'failed' | null;
+  size: number;
+  bytes: number;
+  peerOnline: boolean;
+  unreachable: boolean;
+  peerName: string;
+}): string | null {
+  const { direction, state, size, bytes, peerOnline, unreachable, peerName } = input;
+  if (state === null || state === 'done') return null;
+  if (state === 'failed') {
+    return direction === 'in' ? "Couldn't download this file" : "Couldn't send this file";
+  }
+  if (!peerOnline) {
+    return direction === 'in'
+      ? `Downloads when ${peerName} opens the app`
+      : `Sends when ${peerName} opens the app`;
+  }
+  if (unreachable) return "Can't connect directly on this network. Retrying…";
+  const percent = size ? Math.min(99, Math.floor((bytes / size) * 100)) : 0;
+  if (bytes === 0) return direction === 'in' ? 'Connecting…' : 'Waiting to send…';
+  return `${direction === 'in' ? 'Downloading' : 'Sending'} ${percent}%`;
+}
