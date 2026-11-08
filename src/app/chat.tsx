@@ -168,26 +168,23 @@ export default function ChatScreen() {
       <Stack.Screen
         options={{
           headerTitle: () => <ChatHeaderTitle name={peer.displayName} />,
-          headerRight: () => (
-            <View style={styles.headerButtons}>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Search messages"
-                hitSlop={12}
-                onPress={() => router.push('/search')}
-              >
-                <Text style={[styles.headerIcon, { color: colors.headerText }]}>⌕</Text>
-              </Pressable>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Settings"
-                hitSlop={12}
-                onPress={() => router.push('/settings')}
-              >
-                <Text style={[styles.headerIcon, { color: colors.headerText }]}>⚙︎</Text>
-              </Pressable>
-            </View>
-          ),
+          // Native iOS bar buttons with SF Symbols: system size, spacing and glass background.
+          unstable_headerRightItems: () => [
+            {
+              type: 'button',
+              label: 'Search',
+              icon: { type: 'sfSymbol', name: 'magnifyingglass' },
+              accessibilityLabel: 'Search messages',
+              onPress: () => router.push('/search'),
+            },
+            {
+              type: 'button',
+              label: 'Settings',
+              icon: { type: 'sfSymbol', name: 'gearshape' },
+              accessibilityLabel: 'Settings',
+              onPress: () => router.push('/settings'),
+            },
+          ],
         }}
       />
 
@@ -340,8 +337,6 @@ const styles = StyleSheet.create({
   flex: { flex: 1 },
   banner: { margin: 8, padding: 10 },
   list: { paddingVertical: 8 },
-  headerButtons: { flexDirection: 'row', gap: 18, alignItems: 'center' },
-  headerIcon: { fontSize: 22 },
   dayRow: { alignItems: 'center', paddingVertical: 8 },
   day: {
     fontSize: 12,

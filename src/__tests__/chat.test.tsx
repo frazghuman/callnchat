@@ -1,5 +1,5 @@
-import { Stack } from 'expo-router';
-import { fireEvent, renderRouter, screen, waitFor } from 'expo-router/testing-library';
+import { router, Stack } from 'expo-router';
+import { act, fireEvent, renderRouter, screen, waitFor } from 'expo-router/testing-library';
 
 import Chat from '@/app/chat';
 import Search from '@/app/search';
@@ -138,7 +138,8 @@ it('finds a message in search', async () => {
   await renderRouter(routes, { initialUrl: '/chat' });
   await receive('The wifi password is pancake');
 
-  await fireEvent.press(screen.getByLabelText('Search messages'));
+  // The header button is a native iOS bar item, which the test renderer doesn't draw.
+  await act(() => router.push('/search'));
   await waitFor(() => expect(screen).toHavePathname('/search'));
   await fireEvent.changeText(screen.getByLabelText('Search messages'), 'pancake');
   expect(await screen.findByText('pancake')).toBeTruthy();
