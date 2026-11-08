@@ -120,6 +120,13 @@ export default function SettingsScreen() {
         </Pressable>
       ) : null}
 
+      {session.peer ? (
+        <Pressable style={[rowStyle, styles.inline]} onPress={() => router.push('/relay')}>
+          <Text style={{ color: colors.text, fontSize: font.body }}>Connection relay</Text>
+          <Text style={{ color: colors.textMuted }}>Optional ›</Text>
+        </Pressable>
+      ) : null}
+
       <View style={[rowStyle, styles.inline]}>
         <Text style={{ color: colors.text, fontSize: font.body }}>Lock with Face ID</Text>
         <Switch

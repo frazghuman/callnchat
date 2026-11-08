@@ -119,3 +119,38 @@ export function transferLabel(input: {
   if (bytes === 0) return direction === 'in' ? 'Connecting…' : 'Waiting to send…';
   return `${direction === 'in' ? 'Downloading' : 'Sending'} ${percent}%`;
 }
+
+const ADDRESS_NAMES: Record<string, string> = {
+  host: 'local network',
+  srflx: 'public address',
+  prflx: 'public address',
+  relay: 'TURN relay',
+};
+
+function describeAddresses(types: string[]): string {
+  const names = [...new Set(types.map((t) => ADDRESS_NAMES[t] ?? t))];
+  return names.length ? names.join(', ') : 'nothing';
+}
+
+/** Plain-language reason a direct connection failed, from the link's diagnostics. */
+export function explainLinkFailure(
+  diagnostics: { local: string[]; remote: string[]; stage: string } | null,
+  peerName: string,
+): string {
+  if (!diagnostics) return `Couldn't connect to ${peerName}'s phone yet. Keep both apps open.`;
+  if (diagnostics.stage === 'signaling') {
+    return (
+      `${peerName}'s phone didn't answer the connection request. Both apps must be open at the ` +
+      'same time. If they are, try again in a moment.'
+    );
+  }
+  const relay = diagnostics.local.includes('relay') || diagnostics.remote.includes('relay');
+  return (
+    `Your phone found: ${describeAddresses(diagnostics.local)}. ` +
+    `${peerName}'s phone found: ${describeAddresses(diagnostics.remote)}. ` +
+    (relay
+      ? 'Even the TURN relay could not connect; check its address and password in Settings.'
+      : 'No direct path worked, which is common on mobile data or strict Wi-Fi. Putting both ' +
+        'phones on the same Wi-Fi usually works, or add a TURN relay in Settings → Connection relay.')
+  );
+}

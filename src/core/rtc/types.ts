@@ -11,7 +11,7 @@ export type IceCandidate = {
   sdpMLineIndex?: number | null;
 };
 
-export type IceServer = { urls: string | string[] };
+export type IceServer = { urls: string | string[]; username?: string; credential?: string };
 
 export interface DataChannelLike {
   readonly readyState: string;
@@ -29,6 +29,7 @@ export interface DataChannelLike {
 
 export interface PeerConnectionLike {
   readonly connectionState: string;
+  readonly iceGatheringState: string;
   readonly localDescription: { type: string; sdp: string } | null;
   createDataChannel(label: string, init?: { ordered?: boolean }): DataChannelLike;
   createOffer(): Promise<{ type: string; sdp?: string }>;
@@ -41,7 +42,10 @@ export interface PeerConnectionLike {
     type: 'icecandidate',
     listener: (event: { candidate: IceCandidate | null }) => void,
   ): void;
-  addEventListener(type: 'connectionstatechange', listener: () => void): void;
+  addEventListener(
+    type: 'connectionstatechange' | 'icegatheringstatechange',
+    listener: () => void,
+  ): void;
   addEventListener(
     type: 'datachannel',
     listener: (event: { channel: DataChannelLike }) => void,

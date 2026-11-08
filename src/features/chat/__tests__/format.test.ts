@@ -1,4 +1,5 @@
 import {
+  explainLinkFailure,
   formatBytes,
   formatDuration,
   formatLastSeen,
@@ -61,5 +62,19 @@ describe('transferLabel', () => {
     expect(formatBytes(2_500)).toBe('2 KB');
     expect(formatBytes(3_500_000)).toBe('3.3 MB');
     expect(formatDuration(65_400)).toBe('1:05');
+  });
+});
+
+describe('explainLinkFailure', () => {
+  it('separates a silent peer from a network that blocks direct paths', () => {
+    expect(explainLinkFailure({ local: ['host'], remote: [], stage: 'signaling' }, 'Bob')).toMatch(
+      /didn't answer/,
+    );
+    const blocked = explainLinkFailure(
+      { local: ['host', 'srflx'], remote: ['srflx'], stage: 'connecting' },
+      'Bob',
+    );
+    expect(blocked).toMatch(/Your phone found: local network, public address\./);
+    expect(blocked).toMatch(/TURN relay in Settings/);
   });
 });

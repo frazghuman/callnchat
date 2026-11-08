@@ -56,6 +56,7 @@ export default function RootLayout() {
           }}
         />
         <Stack.Screen name="location/[id]" options={{ title: 'Location' }} />
+        <Stack.Screen name="relay" options={{ title: 'Connection relay' }} />
         <Stack.Screen name="settings" options={{ title: 'Settings' }} />
       </Stack>
       {locked ? <LockScreen /> : null}

@@ -14,6 +14,7 @@ import {
   type SharedLocation,
 } from '@/core/protocol/frames';
 import { newMessageId } from '@/core/protocol/ids';
+import type { LinkDiagnostics } from '@/core/rtc/peerLink';
 import {
   TransferManager,
   type LinkStatus,
@@ -101,7 +102,7 @@ export type MessengerListener = {
   disappearChanged?: (seconds: DisappearSeconds) => void;
   /** Bytes moved so far for an attachment (live; persisted coarsely). */
   transferProgress?: (id: string, bytes: number) => void;
-  linkStatus?: (status: LinkStatus) => void;
+  linkStatus?: (status: LinkStatus, diagnostics?: LinkDiagnostics) => void;
 };
 
 export class MessageTooLongError extends Error {
@@ -385,6 +386,11 @@ export class Messenger {
     await this.queueControl({ t: 'timer', seconds, at });
   }
 
+  /** Retries the direct file link right away. */
+  retryTransfers() {
+    this.transfers?.retry();
+  }
+
   get disappearSeconds(): DisappearSeconds {
     return this.disappear.seconds;
   }
@@ -549,7 +555,7 @@ export class Messenger {
       peerOnline: () => this.presence.current(this.now()).state === 'online',
       changed: () => this.listener.messagesChanged?.(),
       progress: (id, bytes) => this.listener.transferProgress?.(id, bytes),
-      status: (status) => this.listener.linkStatus?.(status),
+      status: (status, diagnostics) => this.listener.linkStatus?.(status, diagnostics),
     });
   }
 

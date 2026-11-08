@@ -4,11 +4,13 @@ import { bytesToHex } from '@/core/crypto/bytes';
 import { Messenger } from '@/core/messaging/messenger';
 import type { PeerPresence } from '@/core/messaging/presence';
 import { createRelayTransport, DEFAULT_RELAYS, type RelayTransport } from '@/core/nostr/relayPool';
-import { DEFAULT_ICE_SERVERS } from '@/core/rtc/types';
+import type { LinkDiagnostics } from '@/core/rtc/peerLink';
+import { DEFAULT_ICE_SERVERS, type IceServer } from '@/core/rtc/types';
 import type { DisappearSeconds } from '@/core/protocol/frames';
 import type { LinkStatus, TransferConfig } from '@/core/transfer/transferManager';
 import { expoFileStore } from '@/data/expoFileStore';
 import { listMessages, searchMessages, type ChatMessage } from '@/data/messages';
+import { getSetting, setSetting } from '@/data/repositories';
 import type { PreparedAttachment } from '@/features/attachments/prepare';
 import { currentPosition, watchPosition } from '@/features/location/location';
 import { nativeRtc } from '@/features/transfer/nativeRtc';
@@ -36,6 +38,8 @@ type ChatState = {
   /** Live bytes moved per attachment while a transfer runs. */
   progress: Record<string, number>;
   linkStatus: LinkStatus;
+  /** Why the last direct connection attempt failed, for the "can't connect" explanation. */
+  linkDiagnostics: LinkDiagnostics | null;
 
   /** Overrides are for tests; the app connects to the default relays and uses WebRTC. */
   start(
@@ -55,6 +59,10 @@ type ChatState = {
   sendLocation(liveMinutes: number): Promise<void>;
   stopLiveLocation(id: string): Promise<void>;
   fileUri(message: ChatMessage): string | null;
+  retryTransfers(): void;
+  /** Optional TURN relay for networks that block direct connections. */
+  getRelay(): Promise<TurnRelay | null>;
+  setRelay(relay: TurnRelay | null): Promise<void>;
   markRead(): Promise<void>;
   typing(): void;
   search(query: string): Promise<ChatMessage[]>;
@@ -64,6 +72,20 @@ type ChatState = {
   setEditing(message: ChatMessage | null): void;
   clearHighlight(): void;
 };
+
+export type TurnRelay = { urls: string; username: string; credential: string };
+
+const SETTING_TURN = 'turnRelay';
+
+async function loadRelay(session: Session): Promise<TurnRelay | null> {
+  const raw = await getSetting(session.db, SETTING_TURN);
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as TurnRelay;
+  } catch {
+    return null;
+  }
+}
 
 let messenger: Messenger | null = null;
 let activeSession: Session | null = null;
@@ -120,11 +142,14 @@ export const useChatStore = create<ChatState>((set, get) => {
     highlightId: null,
     progress: {},
     linkStatus: 'idle',
+    linkDiagnostics: null,
 
     async start(session, deps = {}) {
       if (messenger || !session.peer || !session.profile) return;
       activeSession = session;
       set({ confirmedAt: session.peer.confirmedAt, running: true });
+      const relay = await loadRelay(session);
+      const iceServers: IceServer[] = relay ? [...DEFAULT_ICE_SERVERS, relay] : DEFAULT_ICE_SERVERS;
 
       messenger = new Messenger(
         {
@@ -132,7 +157,7 @@ export const useChatStore = create<ChatState>((set, get) => {
             deps.transport ?? createRelayTransport(DEFAULT_RELAYS, session.identity.secretKey),
           transfer:
             deps.transfer === undefined
-              ? { store: expoFileStore, rtc: nativeRtc, iceServers: DEFAULT_ICE_SERVERS }
+              ? { store: expoFileStore, rtc: nativeRtc, iceServers }
               : (deps.transfer ?? undefined),
           db: session.db,
           secretKey: session.identity.secretKey,
@@ -152,7 +177,8 @@ export const useChatStore = create<ChatState>((set, get) => {
           disappearChanged: (disappear) => set({ disappear }),
           transferProgress: (id, bytes) =>
             set((state) => ({ progress: { ...state.progress, [id]: bytes } })),
-          linkStatus: (linkStatus) => set({ linkStatus }),
+          linkStatus: (linkStatus, diagnostics) =>
+            set(diagnostics ? { linkStatus, linkDiagnostics: diagnostics } : { linkStatus }),
         },
       );
       await reload();
@@ -251,6 +277,23 @@ export const useChatStore = create<ChatState>((set, get) => {
       // Ours are complete from the start; theirs once the transfer finished and verified.
       if (message.direction === 'in' && message.transferState !== 'done') return null;
       return expoFileStore.uri(message.id, file.name);
+    },
+
+    retryTransfers() {
+      messenger?.retryTransfers();
+    },
+
+    async getRelay() {
+      return activeSession ? loadRelay(activeSession) : null;
+    },
+
+    async setRelay(relay) {
+      const session = activeSession;
+      if (!session) throw new Error('Not connected');
+      await setSetting(session.db, SETTING_TURN, relay ? JSON.stringify(relay) : '');
+      // The relay is part of the connection settings: reconnect with it.
+      await get().stop();
+      await get().start(session);
     },
 
     async markRead() {

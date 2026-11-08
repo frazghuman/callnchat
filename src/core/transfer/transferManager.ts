@@ -1,4 +1,4 @@
-import { PeerLink, type Signal } from '@/core/rtc/peerLink';
+import { PeerLink, type LinkDiagnostics, type Signal } from '@/core/rtc/peerLink';
 import type { DataChannelLike, IceServer, RtcFactory } from '@/core/rtc/types';
 import type { Db } from '@/data/db';
 import { getMessage, setTransfer, unfinishedTransfers, type Message } from '@/data/messages';
@@ -38,7 +38,8 @@ type Hooks = {
   changed: () => void;
   /** Live progress for the UI, not persisted every chunk. */
   progress: (id: string, bytes: number) => void;
-  status: (status: LinkStatus) => void;
+  /** Diagnostics come with failures, to explain them. */
+  status: (status: LinkStatus, diagnostics?: LinkDiagnostics) => void;
 };
 
 type Incoming = { message: Message; name: string; size: number; received: number; saved: number };
@@ -95,6 +96,15 @@ export class TransferManager {
     await this.link?.handleSignal(signal);
   }
 
+  /** Try again now instead of waiting for the backoff (user tapped "Try again"). */
+  retry() {
+    if (this.retryTimer) clearTimeout(this.retryTimer);
+    this.retryTimer = null;
+    this.failures = 0;
+    this.hooks.status('connecting');
+    void this.wake();
+  }
+
   /** Deletes stored bytes for messages that were deleted or expired. */
   async removeFiles(ids: string[]): Promise<void> {
     for (const id of ids) {
@@ -143,7 +153,7 @@ export class TransferManager {
         channel.addEventListener('message', ({ data }) => this.onMessage(data));
         void this.wake();
       },
-      onClose: (reason) => {
+      onClose: (reason, diagnostics) => {
         if (this.link !== link) return;
         this.link = null;
         this.channel = null;
@@ -156,7 +166,7 @@ export class TransferManager {
           return;
         }
         this.failures += 1;
-        this.hooks.status(this.failures >= 3 ? 'unreachable' : 'connecting');
+        this.hooks.status(this.failures >= 3 ? 'unreachable' : 'connecting', diagnostics);
         const delay = RETRY_DELAYS_MS[Math.min(this.failures - 1, RETRY_DELAYS_MS.length - 1)]!;
         this.retryTimer = setTimeout(() => {
           this.retryTimer = null;

@@ -1,14 +1,20 @@
 import { useAudioPlayer, useAudioPlayerStatus } from 'expo-audio';
 import { Image } from 'expo-image';
 import { useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
 import MapView, { Marker } from 'react-native-maps';
 
 import type { ChatMessage } from '@/data/messages';
 import { useTheme } from '@/ui/theme';
 
 import { useChatStore } from '../chatStore';
-import { formatBytes, formatDuration, formatTime, transferLabel } from '../format';
+import {
+  explainLinkFailure,
+  formatBytes,
+  formatDuration,
+  formatTime,
+  transferLabel,
+} from '../format';
 
 const MEDIA_WIDTH = 240;
 const ABSOLUTE_FILL = { position: 'absolute', top: 0, right: 0, bottom: 0, left: 0 } as const;
@@ -53,6 +59,25 @@ function TransferStatus({ message, peerName }: { message: ChatMessage; peerName:
     peerName,
   });
   if (!label) return null;
+
+  if (unreachable && peerOnline && message.transferState !== 'failed') {
+    return (
+      <Pressable
+        accessibilityRole="button"
+        accessibilityHint="Explains why and lets you try again"
+        onPress={() => {
+          const { linkDiagnostics, retryTransfers } = useChatStore.getState();
+          Alert.alert("Can't connect directly", explainLinkFailure(linkDiagnostics, peerName), [
+            { text: 'OK', style: 'cancel' },
+            { text: 'Try again', onPress: retryTransfers },
+          ]);
+        }}
+      >
+        <Text style={[styles.status, { color: colors.textMuted }]}>{label} ⓘ</Text>
+      </Pressable>
+    );
+  }
+
   return (
     <Text accessibilityLiveRegion="polite" style={[styles.status, { color: colors.textMuted }]}>
       {label}

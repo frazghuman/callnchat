@@ -26,6 +26,8 @@ export function SwipeToReply({
       friction={2}
       leftThreshold={56}
       overshootLeft={false}
+      // The reply icon sits underneath the row; an opaque row keeps it hidden until a swipe.
+      childrenContainerStyle={{ backgroundColor: colors.chatBackground }}
       renderLeftActions={() => (
         <View style={styles.action}>
           <View style={[styles.icon, { backgroundColor: colors.surface }]}>
