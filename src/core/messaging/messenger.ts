@@ -7,11 +7,18 @@ import {
   EDIT_WINDOW_MS,
   MAX_TEXT_LENGTH,
   parseFrame,
+  type Attachment,
   type DisappearSeconds,
   type Frame,
   type MsgFrame,
+  type SharedLocation,
 } from '@/core/protocol/frames';
 import { newMessageId } from '@/core/protocol/ids';
+import {
+  TransferManager,
+  type LinkStatus,
+  type TransferConfig,
+} from '@/core/transfer/transferManager';
 import type { Db } from '@/data/db';
 import {
   advanceOutgoing,
@@ -20,6 +27,7 @@ import {
   dropStaleOutbox,
   duePending,
   dueOutbox,
+  endLiveLocation,
   enqueueOutbox,
   failStalePending,
   getMessage,
@@ -37,6 +45,7 @@ import {
   scheduleRetry,
   setReaction,
   unreadIncomingIds,
+  updateLiveLocation,
   type Message,
 } from '@/data/messages';
 import { getSetting, markPeerConfirmed, setSetting } from '@/data/repositories';
@@ -80,6 +89,8 @@ export type MessengerConfig = {
   /** Outbox retry / housekeeping tick. */
   tickMs?: number;
   receiptDebounceMs?: number;
+  /** Direct-link file transfers; without it attachments are only announced, never moved. */
+  transfer?: TransferConfig;
 };
 
 export type MessengerListener = {
@@ -88,6 +99,9 @@ export type MessengerListener = {
   connectionChanged?: (connectedRelays: number) => void;
   peerConfirmed?: (at: number) => void;
   disappearChanged?: (seconds: DisappearSeconds) => void;
+  /** Bytes moved so far for an attachment (live; persisted coarsely). */
+  transferProgress?: (id: string, bytes: number) => void;
+  linkStatus?: (status: LinkStatus) => void;
 };
 
 export class MessageTooLongError extends Error {
@@ -129,6 +143,7 @@ export class Messenger {
   private receiptTimer: ReturnType<typeof setTimeout> | null = null;
   private lastSync: number | null = null;
   private disappear: DisappearSetting = { seconds: 0, at: 0 };
+  private transfers: TransferManager | null = null;
 
   constructor(
     private readonly config: MessengerConfig,
@@ -153,7 +168,9 @@ export class Messenger {
     this.disappear = await loadDisappear(db);
     this.listener.disappearChanged?.(this.disappear.seconds);
     this.emitPresence();
-    if (await purgeExpired(db, this.now())) this.listener.messagesChanged?.();
+    // Before purging, so files of messages that expired while the app was closed are deleted too.
+    this.transfers = this.createTransfers();
+    await this.purge();
 
     this.config.transport.start({
       filter: () => ({
@@ -175,6 +192,7 @@ export class Messenger {
     void this.sendEphemeral({ t: 'presence', state: 'online' });
     if (!this.confirmed) void this.sendHello();
     void this.flush();
+    void this.transfers?.wake();
 
     this.timers.push(
       setInterval(
@@ -187,6 +205,9 @@ export class Messenger {
 
   async stop(): Promise<void> {
     if (!this.running) return;
+    // Close the direct link first, while we can still send the peer its "bye".
+    this.transfers?.stop();
+    this.transfers = null;
     this.running = false;
     for (const t of this.timers) clearInterval(t);
     this.timers = [];
@@ -223,6 +244,76 @@ export class Messenger {
     this.listener.messagesChanged?.();
     void this.flush();
     return message;
+  }
+
+  /**
+   * Announces a file already placed in the transfer store under `id`; the bytes follow over the
+   * direct link once both phones are online.
+   */
+  async sendFile(
+    id: string,
+    attachment: Attachment,
+    caption = '',
+    replyTo?: string,
+  ): Promise<Message> {
+    const body = caption.trim();
+    if (body.length > MAX_TEXT_LENGTH) throw new MessageTooLongError();
+    const now = this.now();
+    const ttl = this.disappear.seconds;
+    const message = newMessage({
+      id,
+      direction: 'out',
+      body,
+      replyTo: replyTo ?? null,
+      sentAt: now,
+      status: 'pending',
+      expiresAt: ttl ? now + ttl * 1000 : null,
+      attachment,
+      transferState: 'pending',
+    });
+    await insertMessage(this.config.db, message);
+    this.listener.messagesChanged?.();
+    void this.flush();
+    void this.transfers?.wake();
+    return message;
+  }
+
+  /** A location pin, or live location when `liveUntil` is set. Small enough for relays. */
+  async sendLocation(location: SharedLocation, replyTo?: string): Promise<Message> {
+    const now = this.now();
+    const ttl = this.disappear.seconds;
+    const message = newMessage({
+      id: newMessageId(now),
+      direction: 'out',
+      body: '',
+      replyTo: replyTo ?? null,
+      sentAt: now,
+      status: 'pending',
+      expiresAt: ttl ? now + ttl * 1000 : null,
+      location: { ...location, updatedAt: now, endedAt: null },
+    });
+    await insertMessage(this.config.db, message);
+    this.listener.messagesChanged?.();
+    void this.flush();
+    return message;
+  }
+
+  /** New position for our own live location; dropped once sharing has ended. */
+  async updateLiveLocation(id: string, position: Pick<SharedLocation, 'lat' | 'lng' | 'acc'>) {
+    const message = await this.requireOwn(id);
+    const at = this.now();
+    if (!(await updateLiveLocation(this.config.db, message.id, position, at))) return false;
+    this.listener.messagesChanged?.();
+    void this.sendEphemeral({ t: 'locLive', id, ...position, at });
+    return true;
+  }
+
+  async stopLiveLocation(id: string): Promise<void> {
+    await this.requireOwn(id);
+    const at = this.now();
+    if (!(await endLiveLocation(this.config.db, id, at))) return;
+    this.listener.messagesChanged?.();
+    await this.queueControl({ t: 'locEnd', id, at });
   }
 
   /** Marks everything received as read and tells the peer. */
@@ -272,6 +363,7 @@ export class Messenger {
       throw new MessageActionError('too-late');
     }
     await markDeleted(this.config.db, ids, 'out', at);
+    await this.transfers?.removeFiles(ids);
     this.listener.messagesChanged?.();
     await this.queueControl({
       t: 'delete',
@@ -282,6 +374,7 @@ export class Messenger {
   /** Removes messages from this phone only. */
   async deleteForMe(ids: string[]): Promise<void> {
     await hideMessages(this.config.db, ids);
+    await this.transfers?.removeFiles(ids);
     this.listener.messagesChanged?.();
   }
 
@@ -365,6 +458,17 @@ export class Messenger {
         sentAt: message.sentAt,
         ...(message.replyTo ? { replyTo: message.replyTo } : {}),
         ...(ttl > 0 ? { ttl } : {}),
+        ...(message.attachment ? { file: message.attachment } : {}),
+        ...(message.location
+          ? {
+              loc: {
+                lat: message.location.lat,
+                lng: message.location.lng,
+                ...(message.location.acc !== undefined ? { acc: message.location.acc } : {}),
+                ...(message.location.liveUntil ? { liveUntil: message.location.liveUntil } : {}),
+              },
+            }
+          : {}),
       };
       const result = await this.publish(frame).catch(() => ({ ok: 0, failed: 1 }));
       if (result.ok > 0) {
@@ -416,14 +520,37 @@ export class Messenger {
     const { db } = this.config;
     const now = this.now();
     const failed = await failStalePending(db, now - FAIL_AFTER_MS);
-    const expired = await purgeExpired(db, now);
-    if (failed.length || expired) this.listener.messagesChanged?.();
+    if (failed.length) this.listener.messagesChanged?.();
+    await this.purge();
     await pruneSeenEvents(db, now - SEEN_EVENTS_TTL_MS);
     await pruneTombstones(db, now - SEEN_EVENTS_TTL_MS);
     await dropStaleOutbox(db, now - OUTBOX_TTL_MS);
     if (!this.confirmed) void this.sendHello();
     await this.flushReceipts();
     await this.flush();
+    void this.transfers?.wake();
+  }
+
+  /** Hides expired messages and deletes their files. */
+  private async purge() {
+    const ids = await purgeExpired(this.config.db, this.now());
+    if (!ids.length) return;
+    await this.transfers?.removeFiles(ids);
+    this.listener.messagesChanged?.();
+  }
+
+  private createTransfers(): TransferManager | null {
+    const { transfer, publicKeyHex, peer, db } = this.config;
+    if (!transfer) return null;
+    return new TransferManager(transfer, {
+      db,
+      initiator: publicKeyHex < peer.publicKeyHex,
+      sendSignal: (signal) => void this.sendEphemeral({ t: 'rtc', ...signal }),
+      peerOnline: () => this.presence.current(this.now()).state === 'online',
+      changed: () => this.listener.messagesChanged?.(),
+      progress: (id, bytes) => this.listener.transferProgress?.(id, bytes),
+      status: (status) => this.listener.linkStatus?.(status),
+    });
   }
 
   // --- incoming -------------------------------------------------------------------------------
@@ -466,6 +593,9 @@ export class Messenger {
             receivedAt: now,
             status: 'received',
             expiresAt,
+            attachment: frame.file ?? null,
+            transferState: frame.file ? 'pending' : null,
+            location: frame.loc ? { ...frame.loc, updatedAt: frame.sentAt, endedAt: null } : null,
           }),
         );
         if (inserted) {
@@ -476,9 +606,10 @@ export class Messenger {
           await completeIncoming(db, frame.id, frame.replyTo ?? null, expiresAt);
         }
         if (inserted || expiresAt !== null) {
-          await purgeExpired(db, now);
+          await this.purge();
           this.listener.messagesChanged?.();
         }
+        if (inserted && frame.file) void this.transfers?.wake();
         // Acknowledge duplicates too: our earlier receipt may have been lost.
         this.pendingReceipts.delivered.add(frame.id);
         this.scheduleReceipts();
@@ -539,8 +670,33 @@ export class Messenger {
           'in',
           now,
         );
+        await this.transfers?.removeFiles(frame.items.map((i) => i.id));
         this.listener.messagesChanged?.();
         return;
+
+      case 'rtc': {
+        const { t: _t, ...signal } = frame;
+        await this.transfers?.handleSignal(signal);
+        return;
+      }
+
+      case 'locLive': {
+        const message = await getMessage(db, frame.id);
+        if (message?.direction !== 'in') return;
+        const { lat, lng, acc } = frame;
+        if (await updateLiveLocation(db, frame.id, { lat, lng, acc }, frame.at)) {
+          this.listener.messagesChanged?.();
+        }
+        return;
+      }
+
+      case 'locEnd': {
+        const message = await getMessage(db, frame.id);
+        if (message?.direction === 'in' && (await endLiveLocation(db, frame.id, frame.at))) {
+          this.listener.messagesChanged?.();
+        }
+        return;
+      }
 
       case 'timer':
         await this.applyTimer({ seconds: frame.seconds, at: frame.at }, 'peer');
@@ -551,7 +707,10 @@ export class Messenger {
           const wasOnline = this.presence.current(now).state === 'online';
           this.presence.heartbeat(now);
           // Answer right away so the peer doesn't wait a full heartbeat to see us online.
-          if (!wasOnline) void this.sendEphemeral({ t: 'presence', state: 'online' });
+          if (!wasOnline) {
+            void this.sendEphemeral({ t: 'presence', state: 'online' });
+            void this.transfers?.wake();
+          }
         } else {
           this.presence.wentOffline(now);
           await this.persistLastSeen();

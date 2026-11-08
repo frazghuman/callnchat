@@ -62,6 +62,13 @@ const MIGRATIONS: string[] = [
     next_attempt_at INTEGER
   );
   `,
+  `
+  ALTER TABLE messages ADD COLUMN attachment TEXT;
+  ALTER TABLE messages ADD COLUMN transfer_state TEXT;
+  ALTER TABLE messages ADD COLUMN transfer_bytes INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE messages ADD COLUMN location TEXT;
+  CREATE INDEX messages_transfer ON messages (transfer_state) WHERE transfer_state IS NOT NULL;
+  `,
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.length;

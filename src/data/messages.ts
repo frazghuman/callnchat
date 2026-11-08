@@ -1,7 +1,19 @@
+import type { Attachment, SharedLocation } from '@/core/protocol/frames';
+
 import type { Db, SqlValue } from './db';
 
 export type OutgoingStatus = 'pending' | 'sent' | 'delivered' | 'read' | 'failed';
 export type IncomingStatus = 'received' | 'read';
+
+/** Direct-link file transfer progress: pending (not started) → active → done, or failed. */
+export type TransferState = 'pending' | 'active' | 'done' | 'failed';
+
+export type StoredLocation = SharedLocation & {
+  /** Time of the position shown (sender's clock, ms). */
+  updatedAt: number;
+  /** Live sharing stopped early. */
+  endedAt: number | null;
+};
 
 export type Message = {
   id: string;
@@ -18,6 +30,11 @@ export type Message = {
   /** Deleted for everyone: kept as a tombstone ("This message was deleted"). */
   deletedAt: number | null;
   expiresAt: number | null;
+  attachment: Attachment | null;
+  transferState: TransferState | null;
+  /** Bytes received (incoming) or confirmed by the peer (outgoing). */
+  transferBytes: number;
+  location: StoredLocation | null;
 };
 
 export type Reactions = { me: string | null; peer: string | null };
@@ -44,7 +61,20 @@ type MessageRow = {
   edited_at: number | null;
   deleted_at: number | null;
   expires_at: number | null;
+  attachment: string | null;
+  transfer_state: TransferState | null;
+  transfer_bytes: number;
+  location: string | null;
 };
+
+function parseJson<T>(raw: string | null): T | null {
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as T;
+  } catch {
+    return null;
+  }
+}
 
 const toMessage = (r: MessageRow): Message => ({
   id: r.id,
@@ -58,6 +88,10 @@ const toMessage = (r: MessageRow): Message => ({
   editedAt: r.edited_at,
   deletedAt: r.deleted_at,
   expiresAt: r.expires_at,
+  attachment: parseJson<Attachment>(r.attachment),
+  transferState: r.transfer_state,
+  transferBytes: r.transfer_bytes,
+  location: parseJson<StoredLocation>(r.location),
 });
 
 const placeholders = (n: number) => Array.from({ length: n }, () => '?').join(', ');
@@ -73,6 +107,10 @@ export function newMessage(
     editedAt: null,
     deletedAt: null,
     expiresAt: null,
+    attachment: null,
+    transferState: null,
+    transferBytes: 0,
+    location: null,
     ...m,
   };
 }
@@ -100,8 +138,9 @@ export async function insertMessage(db: Db, m: Message): Promise<boolean> {
   if (await exists(db, m.id)) return false;
   await db.run(
     `INSERT INTO messages
-       (id, direction, kind, body, reply_to, sent_at, received_at, status, edited_at, deleted_at, expires_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       (id, direction, kind, body, reply_to, sent_at, received_at, status, edited_at, deleted_at,
+        expires_at, attachment, transfer_state, transfer_bytes, location)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       m.id,
       m.direction,
@@ -114,6 +153,10 @@ export async function insertMessage(db: Db, m: Message): Promise<boolean> {
       m.editedAt,
       m.deletedAt,
       m.expiresAt,
+      m.attachment ? JSON.stringify(m.attachment) : null,
+      m.transferState,
+      m.transferBytes,
+      m.location ? JSON.stringify(m.location) : null,
     ],
   );
   return true;
@@ -233,7 +276,8 @@ export async function applyEdit(
 export async function markDeleted(db: Db, ids: string[], direction: 'in' | 'out', at: number) {
   if (!ids.length) return;
   await db.run(
-    `UPDATE messages SET body = '', deleted_at = ?, expires_at = NULL
+    `UPDATE messages SET body = '', deleted_at = ?, expires_at = NULL, attachment = NULL,
+       transfer_state = NULL, location = NULL
      WHERE direction = ? AND deleted_at IS NULL AND id IN (${placeholders(ids.length)})`,
     [at, direction, ...ids],
   );
@@ -247,23 +291,23 @@ export async function markDeleted(db: Db, ids: string[], direction: 'in' | 'out'
 export async function hideMessages(db: Db, ids: string[]): Promise<void> {
   if (!ids.length) return;
   await db.run(
-    `UPDATE messages SET hidden = 1, body = '' WHERE id IN (${placeholders(ids.length)})`,
+    `UPDATE messages SET hidden = 1, body = '', attachment = NULL, transfer_state = NULL,
+       location = NULL
+     WHERE id IN (${placeholders(ids.length)})`,
     ids,
   );
   await db.run(`DELETE FROM reactions WHERE message_id IN (${placeholders(ids.length)})`, ids);
 }
 
-/** Hides every message whose disappearing timer ran out; returns how many. */
-export async function purgeExpired(db: Db, now: number): Promise<number> {
+/** Hides every message whose disappearing timer ran out; returns their ids. */
+export async function purgeExpired(db: Db, now: number): Promise<string[]> {
   const rows = await db.all<{ id: string }>(
     'SELECT id FROM messages WHERE hidden = 0 AND expires_at IS NOT NULL AND expires_at <= ?',
     [now],
   );
-  await hideMessages(
-    db,
-    rows.map((r) => r.id),
-  );
-  return rows.length;
+  const ids = rows.map((r) => r.id);
+  await hideMessages(db, ids);
+  return ids;
 }
 
 /** Tombstones older than relay retention can't be resurrected any more. */
@@ -423,4 +467,58 @@ export async function retryOutbox(
 
 export async function dropStaleOutbox(db: Db, olderThan: number): Promise<void> {
   await db.run('DELETE FROM outbox WHERE created_at < ?', [olderThan]);
+}
+
+// --- file transfers ------------------------------------------------------------------------------
+
+export async function setTransfer(
+  db: Db,
+  id: string,
+  state: TransferState,
+  bytes: number,
+): Promise<void> {
+  await db.run(
+    'UPDATE messages SET transfer_state = ?, transfer_bytes = ? WHERE id = ? AND attachment IS NOT NULL',
+    [state, bytes, id],
+  );
+}
+
+/** Visible file messages whose transfer isn't finished, oldest first. */
+export async function unfinishedTransfers(db: Db, direction: 'in' | 'out'): Promise<Message[]> {
+  const rows = await db.all<MessageRow>(
+    `SELECT * FROM messages
+     WHERE direction = ? AND attachment IS NOT NULL AND hidden = 0 AND deleted_at IS NULL
+       AND transfer_state IN ('pending', 'active')
+     ORDER BY sent_at`,
+    [direction],
+  );
+  return rows.map(toMessage);
+}
+
+// --- live location -------------------------------------------------------------------------------
+
+/** Applies a live position if sharing is still on and the position is newer than the stored one. */
+export async function updateLiveLocation(
+  db: Db,
+  id: string,
+  position: Pick<SharedLocation, 'lat' | 'lng' | 'acc'>,
+  at: number,
+): Promise<boolean> {
+  const message = await getMessage(db, id);
+  const current = message?.location;
+  if (!current?.liveUntil || current.endedAt || at > current.liveUntil || at <= current.updatedAt) {
+    return false;
+  }
+  const next: StoredLocation = { ...current, ...position, updatedAt: at };
+  await db.run('UPDATE messages SET location = ? WHERE id = ?', [JSON.stringify(next), id]);
+  return true;
+}
+
+export async function endLiveLocation(db: Db, id: string, at: number): Promise<boolean> {
+  const message = await getMessage(db, id);
+  const current = message?.location;
+  if (!current?.liveUntil || current.endedAt) return false;
+  const next: StoredLocation = { ...current, endedAt: at };
+  await db.run('UPDATE messages SET location = ? WHERE id = ?', [JSON.stringify(next), id]);
+  return true;
 }

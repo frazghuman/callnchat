@@ -22,20 +22,58 @@ const hello = z.object({
   name: z.string().min(1).max(40),
 });
 
-const msg = z.object({
-  t: z.literal('msg'),
-  id: messageIdSchema,
-  text: z.string().min(1).max(MAX_TEXT_LENGTH),
-  sentAt: timestamp,
-  replyTo: messageIdSchema.optional(),
-  /** Disappearing messages: seconds after `sentAt` when both phones remove it. */
-  ttl: z
-    .number()
-    .int()
-    .positive()
-    .max(DISAPPEAR_OPTIONS[DISAPPEAR_OPTIONS.length - 1]!)
-    .optional(),
+/** Largest attachment we transfer; also bounds how long a direct transfer can take. */
+export const MAX_FILE_SIZE = 100 * 1024 * 1024;
+
+const attachment = z.object({
+  kind: z.enum(['image', 'video', 'audio', 'file']),
+  name: z.string().min(1).max(200),
+  mime: z.string().min(1).max(100),
+  size: z.number().int().positive().max(MAX_FILE_SIZE),
+  sha256: hex(64),
+  /** Tiny base64 JPEG shown while the real file is still on its way. */
+  thumb: z.string().max(16_000).optional(),
+  width: z.number().int().positive().optional(),
+  height: z.number().int().positive().optional(),
+  /** Milliseconds, for audio and video. */
+  duration: z.number().int().nonnegative().optional(),
 });
+export type Attachment = z.infer<typeof attachment>;
+
+const coordinates = {
+  lat: z.number().min(-90).max(90),
+  lng: z.number().min(-180).max(180),
+  /** Metres. */
+  acc: z.number().nonnegative().max(100_000).optional(),
+};
+
+const location = z.object({
+  ...coordinates,
+  /** Set for live location: updates stop after this time (ms). */
+  liveUntil: timestamp.optional(),
+});
+export type SharedLocation = z.infer<typeof location>;
+
+const msg = z
+  .object({
+    t: z.literal('msg'),
+    id: messageIdSchema,
+    /** Caption for attachments; may be empty then. */
+    text: z.string().max(MAX_TEXT_LENGTH),
+    sentAt: timestamp,
+    replyTo: messageIdSchema.optional(),
+    /** Disappearing messages: seconds after `sentAt` when both phones remove it. */
+    ttl: z
+      .number()
+      .int()
+      .positive()
+      .max(DISAPPEAR_OPTIONS[DISAPPEAR_OPTIONS.length - 1]!)
+      .optional(),
+    file: attachment.optional(),
+    loc: location.optional(),
+  })
+  .refine((m) => m.text.length > 0 || !!m.file || !!m.loc, 'empty message')
+  .refine((m) => !(m.file && m.loc), 'file and location in one message');
 
 const receipt = z.object({
   t: z.literal('receipt'),
@@ -82,6 +120,34 @@ const timer = z.object({
   at: timestamp,
 });
 
+/** WebRTC signaling for the direct file link; ephemeral, only useful while both are online. */
+const rtc = z.object({
+  t: z.literal('rtc'),
+  /** Connection attempt id, so stale signals from an earlier attempt are ignored. */
+  sid: hex(16),
+  kind: z.enum(['want', 'offer', 'answer', 'ice', 'bye']),
+  sdp: z.string().max(20_000).optional(),
+  candidate: z
+    .object({
+      candidate: z.string().max(1_000),
+      sdpMid: z.string().max(100).nullable().optional(),
+      sdpMLineIndex: z.number().int().nonnegative().nullable().optional(),
+    })
+    .optional(),
+});
+export type RtcFrame = z.infer<typeof rtc>;
+
+/** Live location position update; ephemeral, the last one is what the other side keeps. */
+const locLive = z.object({
+  t: z.literal('locLive'),
+  id: messageIdSchema,
+  ...coordinates,
+  at: timestamp,
+});
+
+/** Live location stopped early (durable, so the map stops showing "live" later too). */
+const locEnd = z.object({ t: z.literal('locEnd'), id: messageIdSchema, at: timestamp });
+
 const frameSchema = z.discriminatedUnion('t', [
   hello,
   msg,
@@ -92,6 +158,9 @@ const frameSchema = z.discriminatedUnion('t', [
   edit,
   del,
   timer,
+  rtc,
+  locLive,
+  locEnd,
 ]);
 
 export type Frame = z.infer<typeof frameSchema>;
@@ -107,5 +176,7 @@ export function parseFrame(value: unknown): Frame | null {
 
 /** Ephemeral frames are not stored by relays and are useless when delivered late. */
 export function isEphemeral(frame: Frame): boolean {
-  return frame.t === 'presence' || frame.t === 'typing';
+  return (
+    frame.t === 'presence' || frame.t === 'typing' || frame.t === 'rtc' || frame.t === 'locLive'
+  );
 }

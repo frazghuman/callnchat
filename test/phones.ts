@@ -1,6 +1,7 @@
 import { bytesToHex } from '@/core/crypto/bytes';
 import { Messenger } from '@/core/messaging/messenger';
 import type { PeerPresence } from '@/core/messaging/presence';
+import type { TransferConfig } from '@/core/transfer/transferManager';
 import { createRelayTransport } from '@/core/nostr/relayPool';
 import type { DisappearSeconds } from '@/core/protocol/frames';
 import { listMessages, type ChatMessage } from '@/data/messages';
@@ -16,6 +17,8 @@ export type Phone = {
   presence: PeerPresence | null;
   confirmedAt: number | null;
   disappear: DisappearSeconds;
+  /** Latest live progress per attachment id. */
+  progress: Map<string, number>;
   messages(): Promise<ChatMessage[]>;
   message(id: string): Promise<ChatMessage | undefined>;
 };
@@ -45,13 +48,14 @@ export async function createSessions(): Promise<[Session, Session]> {
 export function createPhone(
   session: Session,
   relayUrls: string[],
-  options: { now?: () => number } = {},
+  options: { now?: () => number; transfer?: TransferConfig } = {},
 ): Phone {
   const phone: Phone = {
     session,
     presence: null,
     confirmedAt: session.peer!.confirmedAt,
     disappear: 0,
+    progress: new Map(),
     messages: () => listMessages(session.db, 100),
     message: async (id) => (await listMessages(session.db, 100)).find((m) => m.id === id),
     messenger: null as unknown as Messenger,
@@ -72,6 +76,7 @@ export function createPhone(
         confirmed: session.peer!.confirmedAt !== null,
       },
       now: options.now,
+      transfer: options.transfer,
       heartbeatMs: 200,
       tickMs: 200,
       receiptDebounceMs: 20,
@@ -80,6 +85,7 @@ export function createPhone(
       presenceChanged: (p) => (phone.presence = p),
       peerConfirmed: (at) => (phone.confirmedAt = at),
       disappearChanged: (s) => (phone.disappear = s),
+      transferProgress: (id, bytes) => phone.progress.set(id, bytes),
     },
   );
   return phone;
